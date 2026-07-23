@@ -63,10 +63,27 @@ if (fs.existsSync(HANDBOOK_DIR)) {
 const interpretations = JSON.parse(
   fs.readFileSync(path.join(__dirname, "config", "interpretations.json"), "utf8"));
 
+/* Canonical SCAP D-Form phase keys (see D_PHASES in public/js/app.js).
+ * Legacy free-text values like "D4" or "d-5" normalize to these; anything
+ * unrecognized is kept as entered. */
+const D_PHASE_KEYS = ["pre-d3", "d3", "d4", "d5", "d7", "d9", "d11", "annual"];
+function normalizeDPhase(v) {
+  if (!v) return "";
+  const k = String(v).toLowerCase().replace(/[^a-z0-9]/g, "");
+  return D_PHASE_KEYS.find(p => p.replace(/[^a-z0-9]/g, "") === k) || v;
+}
+
 /* ── Store ───────────────────────────────────────────────────── */
 let projects = [];
 if (fs.existsSync(PROJECTS_FILE)) {
   projects = JSON.parse(fs.readFileSync(PROJECTS_FILE, "utf8"));
+  // One-time normalization of legacy free-text D-phase values ("D4" -> "d4").
+  let migrated = false;
+  for (const p of projects) {
+    const norm = normalizeDPhase(p.dPhase);
+    if (norm !== (p.dPhase || "")) { p.dPhase = norm; migrated = true; }
+  }
+  if (migrated) setImmediate(() => saveProjects());
 }
 function saveProjects() {
   writeFileAtomic(PROJECTS_FILE, JSON.stringify(projects, null, 2));
@@ -117,6 +134,7 @@ function validateProject(body, { partial } = {}) {
       out[f] = body[f].trim();
     }
   }
+  if (out.dPhase !== undefined) out.dPhase = normalizeDPhase(out.dPhase);
   if (!partial || out.name !== undefined) {
     if (!out.name) errors.push("Project name is required");
   }

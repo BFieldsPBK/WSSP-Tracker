@@ -86,6 +86,45 @@ const PROJECT_TYPE_NAMES = {
   modernization: "Modernization"
 };
 
+/* SCAP D-Form phases relevant to WSSP, per the handbooks' "D-Form Process"
+ * section, with the WSSP submittal due at each phase. */
+const D_PHASES = [
+  { value: "pre-d3", code: "Pre-D-3", label: "Pre-D-3 — Planning / Early Design",
+    note: "Before the project approval application. Plan the integrated design workshop and choose the high-performance standard." },
+  { value: "d3", code: "D-3", label: "D-3 — Application for Project Approval",
+    note: "Indicate WSSP as the high-performance standard pursued on the D-3 (or request an exemption with a letter to OSPI)." },
+  { value: "d4", code: "D-4", label: "D-4 — OSPI Project Approval Issued",
+    note: "Edition lock: SCAP projects apply the WSSP version in effect at D-4 approval. A newer edition may always be used." },
+  { value: "d5", code: "D-5", label: "D-5 — Application for Preliminary Funding Status",
+    note: "Due with D-5: preliminary design WSSP scorecard." },
+  { value: "d7", code: "D-7", label: "D-7 — Proceed with Bid Opening / Negotiate MACC",
+    note: "ELCCA (Energy Conservation Report) cost indicated on the D-7 with the DES review letter. No separate WSSP submittal." },
+  { value: "d9", code: "D-9", label: "D-9 — Authorization to Sign Contracts / MACC Agreement",
+    note: "Due with D-9: final design-phase WSSP scorecard, Sustainable Building Strategy narrative (2–4 pages), and ELCCA executive summary if applicable." },
+  { value: "d11", code: "D-11", label: "D-11 — Application to Release Retainage",
+    note: "Due with/before D-11: final WSSP scorecard, Post Occupancy Evaluation Plan, and certification letter committing to 5 years of annual reporting." },
+  { value: "annual", code: "Reporting", label: "Annual Reporting (5 years)",
+    note: "Report energy and water use through EPA Energy Star Portfolio Manager for five consecutive years after board acceptance." }
+];
+
+/* Normalize stored/legacy values ("D4", "d-5 ", "D11") to canonical keys. */
+function normalizeDPhase(v) {
+  if (!v) return "";
+  const k = String(v).toLowerCase().replace(/[^a-z0-9]/g, "");
+  const hit = D_PHASES.find(p => p.value.replace(/[^a-z0-9]/g, "") === k || p.code.toLowerCase().replace(/[^a-z0-9]/g, "") === k);
+  return hit ? hit.value : v;
+}
+function dPhaseInfo(v) {
+  return D_PHASES.find(p => p.value === normalizeDPhase(v));
+}
+function dPhaseOptions(current) {
+  const cur = normalizeDPhase(current);
+  const known = D_PHASES.some(p => p.value === cur);
+  return `<option value="">Not set</option>` +
+    D_PHASES.map(p => `<option value="${p.value}" ${p.value === cur ? "selected" : ""}>${esc(p.label)}</option>`).join("") +
+    (cur && !known ? `<option value="${esc(cur)}" selected>${esc(current)} (legacy)</option>` : "");
+}
+
 function threshold(protocol, project) {
   const t = protocol.thresholds[project.projectType];
   return t ? t[project.districtClass] : null;
@@ -176,7 +215,7 @@ async function renderProjectList() {
           <span class="badge edition">${esc(protocols[p.protocolId]?.name || p.protocolId)}</span>
           <span class="badge">${esc(PROJECT_TYPE_NAMES[p.projectType] || p.projectType)}</span>
           <span class="badge">Class ${esc(p.districtClass)}</span>
-          ${p.dPhase ? `<span class="badge">${esc(p.dPhase)}</span>` : ""}
+          ${p.dPhase ? `<span class="badge">${esc(dPhaseInfo(p.dPhase)?.code || p.dPhase)}</span>` : ""}
         </div>
       </a>`).join("");
 
@@ -284,7 +323,11 @@ async function renderProjectForm(id) {
           </div>
         </div>
         <div class="form-row">
-          ${field("dPhase", "D phase", { placeholder: "e.g. D4", hint: "Current SCAP D-Form phase, if applicable." })}
+          <div class="form-field">
+            <label for="f-dPhase">D phase</label>
+            <select id="f-dPhase" name="dPhase">${dPhaseOptions(project.dPhase)}</select>
+            <span class="hint">Current SCAP D-Form phase. Also changeable directly on the project page as the project progresses.</span>
+          </div>
           <div class="form-field">
             <label for="f-notes">Notes</label>
             <input id="f-notes" name="notes" type="text" value="${esc(project.notes || "")}" placeholder="Optional">
@@ -457,7 +500,7 @@ async function renderReport(id) {
         <div><b>District</b>${esc(project.district || "—")}</div>
         <div><b>Contact Name &amp; Phone</b>${esc([project.contactName, project.contactPhone].filter(Boolean).join(" · ") || "—")}</div>
         <div><b>Project Name and Type</b>${esc(project.name)} — ${esc(PROJECT_TYPE_NAMES[project.projectType])}</div>
-        <div><b>D Phase</b>${esc(project.dPhase || "—")}</div>
+        <div><b>D Phase</b>${esc(dPhaseInfo(project.dPhase)?.label || project.dPhase || "—")}</div>
         <div><b>Project Number</b>${esc(project.number || "—")}</div>
         <div><b>Address</b>${esc(addressLine || "—")}</div>
       </div>
@@ -645,7 +688,10 @@ async function renderProject(id) {
         <div class="fact"><b>District</b><span>${esc(project.district || "—")}</span></div>
         <div class="fact"><b>District class</b><span>Class ${esc(project.districtClass)}</span></div>
         <div class="fact"><b>Project number</b><span>${esc(project.number || "—")}</span></div>
-        <div class="fact"><b>D phase</b><span>${esc(project.dPhase || "—")}</span></div>
+        <div class="fact fact-dphase"><b>D phase</b>
+          <select id="dphase-select" aria-label="D phase">${dPhaseOptions(project.dPhase)}</select>
+          ${dPhaseInfo(project.dPhase) ? `<span class="fact-hint">${esc(dPhaseInfo(project.dPhase).note)}</span>` : ""}
+        </div>
         <div class="fact"><b>Address</b><span>${esc(addressLine || "—")}</span></div>
         <div class="fact"><b>Contact</b><span>${esc([project.contactName, project.contactPhone].filter(Boolean).join(" · ") || "—")}</span></div>
       </div>
@@ -733,6 +779,10 @@ async function renderProject(id) {
       }
       renderProject(id);
     });
+  });
+  document.getElementById("dphase-select").addEventListener("change", async ev => {
+    await api("PUT", `/api/projects/${id}`, { dPhase: ev.target.value });
+    renderProject(id);
   });
   view.querySelectorAll(".credit-note").forEach(ta => {
     ta.addEventListener("blur", async () => {
