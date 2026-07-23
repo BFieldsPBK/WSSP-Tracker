@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 3;
+const API_VERSION = 4;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -89,13 +89,236 @@ function saveProjects() {
   writeFileAtomic(PROJECTS_FILE, JSON.stringify(projects, null, 2));
 }
 
+/* ── Auth ────────────────────────────────────────────────────── *
+ * Two kinds of principal:
+ *  - staff: full access. Signed in via Microsoft SSO when deployed behind
+ *    Azure App Service Easy Auth (same X-MS-CLIENT-PRINCIPAL headers the
+ *    FOCUS Map uses), or via the staff access code elsewhere (dev/office).
+ *  - guest: an external collaborator holding a per-project invite link.
+ *    Guests can edit the scorecard, notes, and documents of granted
+ *    projects only — no project details, exports, deletes, or other
+ *    projects. Invites are created per project and individually revocable;
+ *    a guest session's grants are re-checked against the invite on every
+ *    request, so revoking cuts access immediately.
+ * Sessions are stateless HMAC-signed cookies; the secret persists in the
+ * data folder. */
+
+const SECRET_FILE = path.join(DATA_DIR, "auth-secret");
+let AUTH_SECRET;
+if (fs.existsSync(SECRET_FILE)) AUTH_SECRET = fs.readFileSync(SECRET_FILE, "utf8").trim();
+else { AUTH_SECRET = crypto.randomBytes(32).toString("hex"); writeFileAtomic(SECRET_FILE, AUTH_SECRET); }
+
+const STAFF_CODE_FILE = path.join(DATA_DIR, "staff-access-code");
+let STAFF_CODE = (process.env.STAFF_ACCESS_CODE || "").trim();
+if (!STAFF_CODE) {
+  if (fs.existsSync(STAFF_CODE_FILE)) STAFF_CODE = fs.readFileSync(STAFF_CODE_FILE, "utf8").trim();
+  if (!STAFF_CODE) { STAFF_CODE = crypto.randomBytes(4).toString("hex"); writeFileAtomic(STAFF_CODE_FILE, STAFF_CODE); }
+}
+
+const IS_AZURE = !!process.env.WEBSITE_SITE_NAME;
+const TRUST_EASY_AUTH = IS_AZURE || process.env.TRUST_MS_PRINCIPAL_HEADERS === "1";
+const STAFF_SESSION_MS = 7 * 24 * 3600e3;
+const GUEST_SESSION_MS = 30 * 24 * 3600e3;
+
+function hmac(s) { return crypto.createHmac("sha256", AUTH_SECRET).update(s).digest("base64url"); }
+function sha256(s) { return crypto.createHash("sha256").update(s).digest("hex"); }
+function makeSessionValue(payload) {
+  const b = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return b + "." + hmac(b);
+}
+function parseSessionValue(v) {
+  try {
+    const dot = v.lastIndexOf(".");
+    if (dot < 1) return null;
+    const b = v.slice(0, dot), sig = v.slice(dot + 1);
+    const expect = hmac(b);
+    if (sig.length !== expect.length ||
+        !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expect))) return null;
+    const p = JSON.parse(Buffer.from(b, "base64url").toString());
+    if (!p.exp || Date.now() > p.exp) return null;
+    return p;
+  } catch (e) { return null; }
+}
+function getCookies(req) {
+  const out = {};
+  (req.headers.cookie || "").split(";").forEach(part => {
+    const i = part.indexOf("=");
+    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+  });
+  return out;
+}
+function setSession(res, payload) {
+  const maxAge = Math.max(0, Math.floor((payload.exp - Date.now()) / 1000));
+  res.setHeader("Set-Cookie",
+    `wssp_session=${makeSessionValue(payload)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`);
+}
+function clearSession(res) {
+  res.setHeader("Set-Cookie", "wssp_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+}
+
 /* ── Middleware ──────────────────────────────────────────────── */
 app.use(express.json({ limit: "2mb" }));
+app.use((req, res, next) => {
+  req.user = null;
+  // Azure Easy Auth injects the signed-in Microsoft identity on every request.
+  if (TRUST_EASY_AUTH && req.headers["x-ms-client-principal"]) {
+    try {
+      const principal = JSON.parse(Buffer.from(req.headers["x-ms-client-principal"], "base64").toString());
+      const claims = {};
+      for (const c of principal.claims || []) claims[c.typ] = c.val;
+      const email = claims["preferred_username"] ||
+        claims["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"] ||
+        claims["emails"] || "";
+      req.user = { kind: "staff", name: claims["name"] || email, email, via: "microsoft" };
+      return next();
+    } catch (e) { /* malformed header — fall through to cookie auth */ }
+  }
+  const c = getCookies(req).wssp_session;
+  if (c) req.user = parseSessionValue(c);
+  next();
+});
 app.use(express.static(path.join(__dirname, "public")));
+
+function isStaff(req) { return !!req.user && req.user.kind === "staff"; }
+/* A guest grant is {p: projectId, inv: inviteId}; valid only while the
+ * invite it came from still exists and is not revoked. */
+function validGrants(req) {
+  if (!req.user || req.user.kind !== "guest") return [];
+  return (req.user.grants || []).filter(g => {
+    const proj = projects.find(x => x.id === g.p);
+    const inv = proj && (proj.invites || []).find(i => i.id === g.inv);
+    return inv && !inv.revoked;
+  });
+}
+function canAccess(req, projectId) {
+  return isStaff(req) || validGrants(req).some(g => g.p === projectId);
+}
+function requireStaff(req, res) {
+  if (isStaff(req)) return true;
+  res.status(req.user ? 403 : 401).json({ errors: [req.user ? "Staff access required" : "Sign-in required"] });
+  return false;
+}
+function requireAccess(req, res, projectId) {
+  if (canAccess(req, projectId)) return true;
+  res.status(req.user ? 403 : 401).json({ errors: [req.user ? "You don't have access to this project" : "Sign-in required"] });
+  return false;
+}
+function publicInvite(inv) {
+  const { tokenHash, ...rest } = inv;
+  return rest;
+}
+/* What a project looks like over the API: staff see invites (sans token
+ * hashes); guests don't see the invite list at all. */
+function projectView(p, req) {
+  const { invites, ...rest } = p;
+  return isStaff(req) ? { ...rest, invites: (invites || []).map(publicInvite) } : rest;
+}
 
 /* ── API ─────────────────────────────────────────────────────── */
 app.get("/api/meta", (req, res) => {
   res.json({ apiVersion: API_VERSION });
+});
+
+app.get("/api/me", (req, res) => {
+  if (!req.user) return res.json({ authenticated: false, microsoftSso: TRUST_EASY_AUTH });
+  const out = {
+    authenticated: true,
+    kind: req.user.kind,
+    name: req.user.name || "",
+    email: req.user.email || "",
+    via: req.user.via || "code",
+    microsoftSso: TRUST_EASY_AUTH
+  };
+  if (req.user.kind === "guest") {
+    out.projects = validGrants(req)
+      .map(g => { const p = projects.find(x => x.id === g.p); return p && { id: p.id, name: p.name }; })
+      .filter(Boolean);
+  }
+  res.json(out);
+});
+
+app.post("/api/login", (req, res) => {
+  const { name, email, code } = req.body || {};
+  if (!code || String(code).trim() !== STAFF_CODE) {
+    return res.status(401).json({ errors: ["Invalid staff access code"] });
+  }
+  if (!name || !String(name).trim()) return res.status(400).json({ errors: ["Your name is required"] });
+  const payload = {
+    kind: "staff",
+    name: String(name).trim().slice(0, 80),
+    email: String(email || "").trim().slice(0, 120),
+    via: "code",
+    exp: Date.now() + STAFF_SESSION_MS
+  };
+  setSession(res, payload);
+  res.json({ ok: true });
+});
+
+app.post("/api/logout", (req, res) => {
+  clearSession(res);
+  res.json({ ok: true });
+});
+
+/* ── Invites ─────────────────────────────────────────────────── */
+app.post("/api/projects/:id/invites", (req, res) => {
+  if (!requireStaff(req, res)) return;
+  const p = findProject(req, res);
+  if (!p) return;
+  const email = String((req.body || {}).email || "").trim().toLowerCase();
+  if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ errors: ["A valid email address is required"] });
+  const token = crypto.randomBytes(24).toString("base64url");
+  if (!p.invites) p.invites = [];
+  const invite = {
+    id: crypto.randomBytes(6).toString("hex"),
+    email,
+    tokenHash: sha256(token),
+    createdAt: new Date().toISOString(),
+    createdBy: req.user.name || req.user.email || "staff",
+    revoked: false,
+    lastUsedAt: null
+  };
+  p.invites.push(invite);
+  p.updatedAt = new Date().toISOString();
+  saveProjects();
+  res.status(201).json({ token, invite: publicInvite(invite) });
+});
+
+app.delete("/api/projects/:id/invites/:inviteId", (req, res) => {
+  if (!requireStaff(req, res)) return;
+  const p = findProject(req, res);
+  if (!p) return;
+  const inv = (p.invites || []).find(i => i.id === req.params.inviteId);
+  if (!inv) return res.status(404).json({ errors: ["Invite not found"] });
+  inv.revoked = true;
+  p.updatedAt = new Date().toISOString();
+  saveProjects();
+  res.json(projectView(p, req));
+});
+
+app.post("/api/invites/redeem", (req, res) => {
+  const token = String((req.body || {}).token || "");
+  if (!token) return res.status(400).json({ errors: ["Missing invite token"] });
+  const h = sha256(token);
+  for (const p of projects) {
+    const inv = (p.invites || []).find(i => i.tokenHash === h);
+    if (!inv) continue;
+    if (inv.revoked) {
+      return res.status(410).json({ errors: ["This invite link has been revoked. Contact your PBK project contact for a new one."] });
+    }
+    inv.lastUsedAt = new Date().toISOString();
+    saveProjects();
+    if (isStaff(req)) return res.json({ projectId: p.id, projectName: p.name, staff: true });
+    // Merge into any existing guest session so one consultant can hold
+    // invites to several projects at once.
+    const gs = validGrants(req).filter(g => g.p !== p.id);
+    gs.push({ p: p.id, inv: inv.id });
+    setSession(res, {
+      kind: "guest", name: inv.email, email: inv.email,
+      grants: gs, exp: Date.now() + GUEST_SESSION_MS
+    });
+    return res.json({ projectId: p.id, projectName: p.name });
+  }
+  res.status(404).json({ errors: ["Invite link not recognized. It may have been replaced — ask your PBK contact for a current link."] });
 });
 
 app.get("/api/protocols", (req, res) => {
@@ -107,11 +330,16 @@ app.get("/api/reference", (req, res) => {
 });
 
 app.get("/api/projects", (req, res) => {
+  if (!req.user) return res.status(401).json({ errors: ["Sign-in required"] });
+  // Guests only ever see the projects they hold live invites to.
+  const visible = isStaff(req)
+    ? projects
+    : projects.filter(p => validGrants(req).some(g => g.p === p.id));
   // List view only needs the summary, not every credit selection.
-  res.json(projects.map(p => ({
+  res.json(visible.map(p => ({
     id: p.id, name: p.name, number: p.number, district: p.district,
     districtClass: p.districtClass, projectType: p.projectType,
-    protocolId: p.protocolId, dPhase: p.dPhase,
+    protocolId: p.protocolId, dPhase: p.dPhase, contactName: p.contactName,
     city: p.city, updatedAt: p.updatedAt, createdAt: p.createdAt,
     creditCount: Object.keys(p.credits || {}).length
   })));
@@ -154,6 +382,7 @@ function validateProject(body, { partial } = {}) {
 }
 
 app.post("/api/projects", (req, res) => {
+  if (!requireStaff(req, res)) return;
   const { errors, out } = validateProject(req.body || {});
   if (errors.length) return res.status(400).json({ errors });
   const now = new Date().toISOString();
@@ -176,11 +405,13 @@ function findProject(req, res) {
 }
 
 app.get("/api/projects/:id", (req, res) => {
+  if (!requireAccess(req, res, req.params.id)) return;
   const p = findProject(req, res);
-  if (p) res.json(p);
+  if (p) res.json(projectView(p, req));
 });
 
 app.put("/api/projects/:id", (req, res) => {
+  if (!requireStaff(req, res)) return;
   const p = findProject(req, res);
   if (!p) return;
   const { errors, out } = validateProject(req.body || {}, { partial: true });
@@ -195,10 +426,11 @@ app.put("/api/projects/:id", (req, res) => {
   Object.assign(p, out);
   p.updatedAt = new Date().toISOString();
   saveProjects();
-  res.json(p);
+  res.json(projectView(p, req));
 });
 
 app.put("/api/projects/:id/credits/:creditId", (req, res) => {
+  if (!requireAccess(req, res, req.params.id)) return;
   const p = findProject(req, res);
   if (!p) return;
   const { status, points } = req.body || {};
@@ -220,12 +452,13 @@ app.put("/api/projects/:id/credits/:creditId", (req, res) => {
   }
   p.updatedAt = new Date().toISOString();
   saveProjects();
-  res.json(p);
+  res.json(projectView(p, req));
 });
 
 /* Per-credit notes, stored apart from status entries so clearing a
  * credit's Yes/Maybe/No never discards its notes. */
 app.put("/api/projects/:id/credits/:creditId/note", (req, res) => {
+  if (!requireAccess(req, res, req.params.id)) return;
   const p = findProject(req, res);
   if (!p) return;
   const text = req.body && typeof req.body.text === "string" ? req.body.text.trim() : "";
@@ -234,7 +467,7 @@ app.put("/api/projects/:id/credits/:creditId/note", (req, res) => {
   else delete p.creditNotes[req.params.creditId];
   p.updatedAt = new Date().toISOString();
   saveProjects();
-  res.json(p);
+  res.json(projectView(p, req));
 });
 
 /* ── Credit documentation ────────────────────────────────────── *
@@ -248,6 +481,7 @@ function allDocuments(p) {
 }
 
 app.post("/api/projects/:id/credits/:creditId/files", upload.single("file"), (req, res) => {
+  if (!requireAccess(req, res, req.params.id)) return;
   const p = findProject(req, res);
   if (!p) return;
   if (!req.file) return res.status(400).json({ errors: ["No file received"] });
@@ -262,10 +496,11 @@ app.post("/api/projects/:id/credits/:creditId/files", upload.single("file"), (re
   });
   p.updatedAt = new Date().toISOString();
   saveProjects();
-  res.status(201).json(p);
+  res.status(201).json(projectView(p, req));
 });
 
 app.get("/api/projects/:id/files/:fileId", (req, res) => {
+  if (!requireAccess(req, res, req.params.id)) return;
   const p = findProject(req, res);
   if (!p) return;
   const doc = allDocuments(p).find(d => d.id === req.params.fileId);
@@ -274,6 +509,7 @@ app.get("/api/projects/:id/files/:fileId", (req, res) => {
 });
 
 app.delete("/api/projects/:id/files/:fileId", (req, res) => {
+  if (!requireStaff(req, res)) return;
   const p = findProject(req, res);
   if (!p) return;
   for (const [creditId, list] of Object.entries(p.documents || {})) {
@@ -284,13 +520,14 @@ app.delete("/api/projects/:id/files/:fileId", (req, res) => {
       try { fs.unlinkSync(path.join(FILES_DIR, doc.storedName)); } catch (e) { /* already gone */ }
       p.updatedAt = new Date().toISOString();
       saveProjects();
-      return res.json(p);
+      return res.json(projectView(p, req));
     }
   }
   res.status(404).json({ errors: ["File not found"] });
 });
 
 app.delete("/api/projects/:id", (req, res) => {
+  if (!requireStaff(req, res)) return;
   const idx = projects.findIndex(p => p.id === req.params.id);
   if (idx === -1) return res.status(404).json({ errors: ["Project not found"] });
   const [removed] = projects.splice(idx, 1);

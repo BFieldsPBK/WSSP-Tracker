@@ -46,9 +46,31 @@ Condensed + Source Sans 3, navy/red brand palette, white cards on a pale
 blue-gray page) used by the FOCUS Map and PNW Strategic Plan tools. Fonts
 are bundled in `public/vendor/fonts`, so the tool needs no internet access.
 
-## Planned
+## Sign-in and permissions
 
-- Client / consultant / contractor access with per-project roles
+Two kinds of user:
+
+- **PBK staff** — full access: view, create, and edit projects, manage
+  invitations, export reports, delete. When deployed to Azure App Service
+  with Easy Auth (the FOCUS Map pattern), staff sign in with **Microsoft
+  SSO** automatically — the server reads the same `X-MS-CLIENT-PRINCIPAL`
+  headers. Anywhere else (Codespaces, office machine), staff sign in with
+  the **staff access code**, which is printed in the server console at
+  startup, stored in `data/staff-access-code`, and overridable with the
+  `STAFF_ACCESS_CODE` environment variable.
+- **Invited collaborators (guests)** — consultants, contractors, district
+  contacts. Staff open a project → **Share** → enter an email → the tool
+  generates a one-off invite link (copy it or open a prefilled email
+  draft). The link signs the collaborator in with no account: they can set
+  credit statuses and points, edit credit notes, and upload documents on
+  **that project only**. No project details editing, no report export, no
+  deletes, no view of other projects (their home page lists only projects
+  they hold invites to). Invites are revocable per person per project, and
+  revocation cuts access immediately. The same person can hold invites to
+  several projects at once.
+
+Sessions are HMAC-signed cookies (secret in `data/auth-secret`); invite
+tokens are stored hashed.
 
 ## Running it
 

@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 3;
+const API_VERSION = 4;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {
@@ -30,6 +30,32 @@ async function checkVersion() {
 }
 
 /* ── Protocol helpers ────────────────────────────────────────── */
+/* ── Session ─────────────────────────────────────────────────── */
+let ME = null;
+async function loadMe(force) {
+  if (!ME || force) ME = await api("GET", "/api/me");
+  updateUserChip();
+  return ME;
+}
+function isStaffUser() { return ME && ME.authenticated && ME.kind === "staff"; }
+
+function updateUserChip() {
+  const el = document.getElementById("app-user");
+  if (!el) return;
+  if (!ME || !ME.authenticated) { el.innerHTML = ""; return; }
+  const label = ME.kind === "staff"
+    ? `${esc(ME.name || ME.email || "Staff")}<span class="chip-role">PBK Staff</span>`
+    : `${esc(ME.email || "Guest")}<span class="chip-role">Guest</span>`;
+  el.innerHTML = `<span class="chip-name">${label}</span>
+    <button type="button" id="sign-out" class="chip-signout">Sign out</button>`;
+  document.getElementById("sign-out").addEventListener("click", async () => {
+    await api("POST", "/api/logout");
+    ME = null;
+    location.hash = "#/login";
+    route();
+  });
+}
+
 let PROTOCOLS = null; // id -> protocol
 async function loadProtocols() {
   if (!PROTOCOLS) {
@@ -185,23 +211,107 @@ const openDocPanels = new Set();
 /* Group purposes open and categories collapsed, keyed to survive re-renders. */
 const openPurposes = new Set();
 const collapsedCats = new Set();
+/* Sharing panel open state and the most recently created invite link per project. */
+const sharingOpen = new Set();
+const lastInviteLinks = {};
 
 /* ── Routes ──────────────────────────────────────────────────── */
 async function route() {
   const hash = location.hash || "#/";
   try {
+    // Invite links work with no prior session — the link is the credential.
+    let m = hash.match(/^#\/invite\/([A-Za-z0-9_-]+)$/);
+    if (m) return renderInviteRedeem(m[1]);
+    await loadMe();
+    if (!ME.authenticated) return renderLogin();
+    if (hash === "#/login") { location.hash = "#/"; return; }
     if (hash === "#/" || hash === "#") return renderProjectList();
     if (hash === "#/new") return renderProjectForm();
     if (hash === "#/reference") return renderReference();
-    let m = hash.match(/^#\/project\/([a-z0-9]+)\/report$/);
-    if (m) return renderReport(m[1]);
+    m = hash.match(/^#\/project\/([a-z0-9]+)\/report$/);
+    if (m) return isStaffUser() ? renderReport(m[1]) : renderProject(m[1]);
     m = hash.match(/^#\/project\/([a-z0-9]+)\/edit$/);
-    if (m) return renderProjectForm(m[1]);
+    if (m) return isStaffUser() ? renderProjectForm(m[1]) : renderProject(m[1]);
     m = hash.match(/^#\/project\/([a-z0-9]+)$/);
     if (m) return renderProject(m[1]);
     view.innerHTML = `<div class="empty-state card"><h2>Page not found</h2><p><a href="#/">Back to projects</a></p></div>`;
   } catch (e) {
     view.innerHTML = `<div class="empty-state card"><h2>Something went wrong</h2><p>${esc(e.message)}</p><p><a href="#/">Back to projects</a></p></div>`;
+  }
+}
+
+/* ── Login & invite redemption ───────────────────────────────── */
+function renderLogin(errorMsg) {
+  view.innerHTML = `
+    <div class="login-wrap">
+      <div class="card login-card">
+        <img src="/assets/logo.png" alt="PBK" class="login-logo">
+        <h1>WSSP Tracker</h1>
+        <p class="lede">Washington Sustainable Schools Protocol compliance tracking.</p>
+        ${errorMsg ? `<div class="form-errors">${esc(errorMsg)}</div>` : ""}
+        ${ME && ME.microsoftSso ? `
+          <a class="btn btn-primary login-ms" href="/.auth/login/aad?post_login_redirect_uri=/">
+            Sign in with Microsoft
+          </a>
+          <div class="login-divider">PBK staff only</div>` : `
+          <form id="login-form">
+            <div class="form-field">
+              <label for="l-name">Your name <span class="req">*</span></label>
+              <input id="l-name" type="text" autocomplete="name" placeholder="e.g. Ben Fields">
+            </div>
+            <div class="form-field">
+              <label for="l-email">Email</label>
+              <input id="l-email" type="email" autocomplete="email" placeholder="you@pbk.com">
+            </div>
+            <div class="form-field">
+              <label for="l-code">Staff access code <span class="req">*</span></label>
+              <input id="l-code" type="password" autocomplete="off">
+              <span class="hint">Shown in the server console at startup. Microsoft SSO replaces this
+              when the tool is deployed to Azure App Service.</span>
+            </div>
+            <button class="btn btn-primary" type="submit" style="width:100%; justify-content:center;">Sign In</button>
+          </form>`}
+        <div class="login-guest-note">
+          Consultants and district collaborators: use the invite link from your PBK contact —
+          no sign-in needed.
+        </div>
+      </div>
+    </div>`;
+  const form = document.getElementById("login-form");
+  if (form) form.addEventListener("submit", async ev => {
+    ev.preventDefault();
+    try {
+      await api("POST", "/api/login", {
+        name: document.getElementById("l-name").value,
+        email: document.getElementById("l-email").value,
+        code: document.getElementById("l-code").value
+      });
+      ME = null;
+      location.hash = "#/";
+      route();
+    } catch (e) {
+      renderLogin(e.message);
+    }
+  });
+}
+
+async function renderInviteRedeem(token) {
+  view.innerHTML = `<div class="login-wrap"><div class="card login-card"><h1>Opening your invite…</h1></div></div>`;
+  try {
+    const result = await api("POST", "/api/invites/redeem", { token });
+    ME = null;
+    await loadMe(true);
+    location.hash = `#/project/${result.projectId}`;
+  } catch (e) {
+    view.innerHTML = `
+      <div class="login-wrap">
+        <div class="card login-card">
+          <img src="/assets/logo.png" alt="PBK" class="login-logo">
+          <h1>Invite Problem</h1>
+          <div class="form-errors">${esc(e.message)}</div>
+          <p class="lede">If you believe this link should work, contact your PBK project contact.</p>
+        </div>
+      </div>`;
   }
 }
 
@@ -214,6 +324,7 @@ async function renderProjectList() {
       <a class="card project-card" href="#/project/${p.id}">
         <h3>${esc(p.name)}</h3>
         <div class="meta">${esc(p.district || "—")}${p.city ? " · " + esc(p.city) : ""}${p.number ? " · #" + esc(p.number) : ""}</div>
+        ${p.contactName ? `<div class="meta card-contact">Contact: ${esc(p.contactName)}</div>` : ""}
         <div class="badges">
           <span class="badge edition">${esc(protocols[p.protocolId]?.name || p.protocolId)}</span>
           <span class="badge">${esc(PROJECT_TYPE_NAMES[p.projectType] || p.projectType)}</span>
@@ -222,20 +333,26 @@ async function renderProjectList() {
         </div>
       </a>`).join("");
 
+  const staff = isStaffUser();
   view.innerHTML = `
     <div class="page-head">
       <div>
         <p class="kicker">Projects</p>
-        <h1>WSSP Projects</h1>
-        <p class="lede">Track Washington Sustainable Schools Protocol compliance across PBK projects.</p>
+        <h1>${staff ? "WSSP Projects" : "Your Projects"}</h1>
+        <p class="lede">${staff
+          ? "Track Washington Sustainable Schools Protocol compliance across PBK projects."
+          : "Projects you've been invited to collaborate on."}</p>
       </div>
-      <a class="btn btn-primary" href="#/new">+ New Project</a>
+      ${staff ? `<a class="btn btn-primary" href="#/new">+ New Project</a>` : ""}
     </div>
     ${projects.length ? `<div class="project-grid">${cards}</div>` : `
       <div class="empty-state card">
-        <h2>No projects yet</h2>
-        <p>Create your first project to start tracking WSSP credits.</p>
-        <p><a class="btn btn-primary" href="#/new">+ New Project</a></p>
+        ${staff ? `
+          <h2>No projects yet</h2>
+          <p>Create your first project to start tracking WSSP credits.</p>
+          <p><a class="btn btn-primary" href="#/new">+ New Project</a></p>` : `
+          <h2>No active invitations</h2>
+          <p>Your invite may have been revoked or replaced — contact your PBK project contact.</p>`}
       </div>`}
   `;
 }
@@ -573,6 +690,7 @@ async function renderProject(id) {
   const [project, protocols] = await Promise.all([api("GET", `/api/projects/${id}`), loadProtocols(), loadReference()]);
   const protocol = protocols[project.protocolId];
   if (!protocol) throw new Error(`Unknown protocol: ${project.protocolId}`);
+  const staff = isStaffUser();
 
   const goal = threshold(protocol, project);
   const score = computeScore(protocol, project);
@@ -637,7 +755,7 @@ async function renderProject(id) {
               <div class="doc-item">
                 <a href="/api/projects/${project.id}/files/${d.id}" download>${esc(d.name)}</a>
                 <span class="doc-meta">${formatBytes(d.size)} · ${new Date(d.uploadedAt).toLocaleDateString()}</span>
-                <button type="button" class="doc-remove" data-file="${d.id}" title="Remove file">&times;</button>
+                ${staff ? `<button type="button" class="doc-remove" data-file="${d.id}" title="Remove file">&times;</button>` : ""}
               </div>`).join("")
             : `<div class="doc-empty">No supporting documentation yet.</div>`}
             <label class="upload-label">
@@ -692,9 +810,11 @@ async function renderProject(id) {
           <h1>${esc(project.name)}</h1>
         </div>
         <div style="display:flex; gap:8px;">
+          ${staff ? `
           <a class="btn btn-primary" href="#/project/${id}/report">Export Report</a>
+          <button class="btn btn-secondary" id="share-project">Share</button>
           <a class="btn btn-secondary" href="#/project/${id}/edit">Edit Details</a>
-          <button class="btn btn-quiet" id="delete-project" title="Delete project">Delete</button>
+          <button class="btn btn-quiet" id="delete-project" title="Delete project">Delete</button>` : ""}
         </div>
       </div>
       <div class="project-facts">
@@ -702,7 +822,9 @@ async function renderProject(id) {
         <div class="fact"><b>District class</b><span>Class ${esc(project.districtClass)}</span></div>
         <div class="fact"><b>Project number</b><span>${esc(project.number || "—")}</span></div>
         <div class="fact fact-dphase"><b>D phase</b>
-          <select id="dphase-select" aria-label="D phase">${dPhaseOptions(project.dPhase)}</select>
+          ${staff
+            ? `<select id="dphase-select" aria-label="D phase">${dPhaseOptions(project.dPhase)}</select>`
+            : `<span>${esc(dPhaseInfo(project.dPhase)?.label || project.dPhase || "—")}</span>`}
           ${dPhaseInfo(project.dPhase) ? `<span class="fact-hint">${esc(dPhaseInfo(project.dPhase).note)}</span>` : ""}
         </div>
         <div class="fact"><b>Address</b><span>${esc(addressLine || "—")}</span></div>
@@ -734,6 +856,48 @@ async function renderProject(id) {
         ${protocol.grandTotal} possible points.
       </div>
     </div>
+
+    ${staff && sharingOpen.has(id) ? (() => {
+      const invites = project.invites || [];
+      const fresh = lastInviteLinks[id];
+      const freshUrl = fresh ? `${location.origin}${location.pathname}#/invite/${fresh.token}` : "";
+      const mailto = fresh ? `mailto:${encodeURIComponent(fresh.email)}` +
+        `?subject=${encodeURIComponent(`Invitation to collaborate: ${project.name} — WSSP Tracker`)}` +
+        `&body=${encodeURIComponent(`You've been invited to collaborate on the WSSP scorecard for ${project.name}.\n\nOpen your invite link to get started — it signs you in automatically, no account needed:\n\n${freshUrl}\n\nYou'll be able to update credit statuses, add notes, and upload supporting documentation for this project.`)}` : "";
+      return `
+      <section class="card sharing-panel">
+        <div class="sharing-head">
+          <h2>Sharing &amp; Invitations</h2>
+          <span>Invited collaborators can update this project's scorecard, notes, and documents —
+          they can't edit project details, export the report, delete anything, or see other projects.</span>
+        </div>
+        ${fresh ? `
+          <div class="invite-fresh">
+            <b>Invite link for ${esc(fresh.email)}</b> — send it now; for security it isn't shown again after you leave this page.
+            <div class="invite-link-row">
+              <input type="text" readonly id="fresh-link" value="${esc(freshUrl)}">
+              <button type="button" class="btn btn-secondary" id="copy-invite">Copy</button>
+              <a class="btn btn-secondary" href="${mailto}">Open Email Draft</a>
+            </div>
+          </div>` : ""}
+        <form id="invite-form" class="invite-form">
+          <input type="email" id="invite-email" placeholder="consultant@example.com" required>
+          <button class="btn btn-primary" type="submit">Create Invite Link</button>
+        </form>
+        ${invites.length ? `
+          <div class="invite-list">
+            ${invites.map(inv => `
+              <div class="invite-row ${inv.revoked ? "revoked" : ""}">
+                <span class="invite-email">${esc(inv.email)}</span>
+                <span class="doc-meta">Invited ${new Date(inv.createdAt).toLocaleDateString()} by ${esc(inv.createdBy || "")}
+                  · ${inv.lastUsedAt ? "last used " + new Date(inv.lastUsedAt).toLocaleDateString() : "never used"}</span>
+                ${inv.revoked
+                  ? `<span class="badge">Revoked</span>`
+                  : `<button type="button" class="btn btn-quiet invite-revoke" data-invite="${inv.id}">Revoke</button>`}
+              </div>`).join("")}
+          </div>` : `<div class="doc-empty">No invitations yet.</div>`}
+      </section>`;
+    })() : ""}
 
     ${protocol.categories.map(catSection).join("")}
   `;
@@ -817,9 +981,42 @@ async function renderProject(id) {
       renderProject(id);
     });
   });
-  document.getElementById("dphase-select").addEventListener("change", async ev => {
+  const dphaseSel = document.getElementById("dphase-select");
+  if (dphaseSel) dphaseSel.addEventListener("change", async ev => {
     await api("PUT", `/api/projects/${id}`, { dPhase: ev.target.value });
     renderProject(id);
+  });
+  /* sharing panel (staff only) */
+  const shareBtn = document.getElementById("share-project");
+  if (shareBtn) shareBtn.addEventListener("click", () => {
+    if (sharingOpen.has(id)) sharingOpen.delete(id);
+    else sharingOpen.add(id);
+    renderProject(id);
+  });
+  const inviteForm = document.getElementById("invite-form");
+  if (inviteForm) inviteForm.addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const email = document.getElementById("invite-email").value;
+    try {
+      const result = await api("POST", `/api/projects/${id}/invites`, { email });
+      lastInviteLinks[id] = { token: result.token, email: result.invite.email };
+      renderProject(id);
+    } catch (e) { alert(e.message); }
+  });
+  const copyBtn = document.getElementById("copy-invite");
+  if (copyBtn) copyBtn.addEventListener("click", async () => {
+    const input = document.getElementById("fresh-link");
+    try { await navigator.clipboard.writeText(input.value); }
+    catch (e) { input.select(); document.execCommand("copy"); }
+    copyBtn.textContent = "Copied!";
+    setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+  });
+  view.querySelectorAll(".invite-revoke").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Revoke this invite? The collaborator will immediately lose access to this project.")) return;
+      await api("DELETE", `/api/projects/${id}/invites/${btn.dataset.invite}`);
+      renderProject(id);
+    });
   });
   view.querySelectorAll(".credit-note").forEach(ta => {
     ta.addEventListener("blur", async () => {
@@ -839,7 +1036,8 @@ async function renderProject(id) {
       renderProject(id);
     });
   });
-  document.getElementById("delete-project").addEventListener("click", async () => {
+  const deleteBtn = document.getElementById("delete-project");
+  if (deleteBtn) deleteBtn.addEventListener("click", async () => {
     if (!confirm(`Delete "${project.name}" and its scorecard? This cannot be undone.`)) return;
     await api("DELETE", `/api/projects/${id}`);
     location.hash = "#/";
