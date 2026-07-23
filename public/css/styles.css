@@ -940,6 +940,27 @@ legend {
 }
 .report-verdict.ok { background: var(--status-yes-bg); color: var(--status-yes); }
 .report-verdict.pending { background: var(--status-maybe-bg); color: var(--status-maybe); }
+.report-verdict.draft { background: var(--status-req-bg); color: var(--status-req); border: 1.5px dashed var(--status-req); }
+
+.maybe-warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  background: var(--status-maybe-bg);
+  border: 1.5px solid var(--status-maybe);
+  border-radius: var(--pbk-radius-sm);
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  font-size: 14px;
+  color: var(--pbk-ink);
+}
+.maybe-warning .maybe-list {
+  font-family: var(--pbk-font-heading);
+  font-weight: 600;
+  color: var(--status-maybe);
+}
 
 .report-fields {
   display: grid;
