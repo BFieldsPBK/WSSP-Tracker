@@ -58,22 +58,23 @@ Two kinds of user:
   the **staff access code**, which is printed in the server console at
   startup, stored in `data/staff-access-code`, and overridable with the
   `STAFF_ACCESS_CODE` environment variable.
-- **Invited collaborators (guests)** — consultants, contractors, district
-  contacts. Staff open a project → **Share** → enter an email → the tool
-  generates a one-off invite link (copy it or open a prefilled email
-  draft). The link signs the collaborator in with no account: they can set
-  credit statuses and points, edit credit notes, and upload documents on
-  **that project only**. No project details editing, no report export, no
-  deletes, no view of other projects (their home page lists only projects
-  they hold invites to). Invites are revocable per person per project, and
-  revocation cuts access immediately. The same person can hold invites to
-  several projects at once. Links are **single-use**: the first redemption
-  claims the link and establishes the session; a forwarded copy of a used
-  link is rejected. Clicking an invitee's name reissues a fresh link (for
-  a lost email or a second device) — the old link stops working.
+- **Invited collaborators (guests)** — consultants, clients, contractors.
+  Staff open a project → **Share** → enter an email → the tool generates
+  an **account-setup link** (copy it or open a prefilled email draft). On
+  first visit the collaborator creates a password bound to their invited
+  email; from then on they sign in on the login page with email +
+  password, from any device. Guests can set credit statuses and points,
+  edit credit notes, and upload documents on invited projects only — no
+  project details editing, report export, deletes, or visibility into
+  other projects. Access derives from active invites per email, so
+  inviting an existing account to another project grants access
+  instantly, and revoking an invite cuts it immediately. Clicking an
+  invitee's name reissues their link, which doubles as a **password
+  reset**; a used setup link can never take over an existing account.
 
 Sessions are HMAC-signed cookies (secret in `data/auth-secret`); invite
-tokens are stored hashed.
+tokens are stored hashed; guest passwords are scrypt-hashed in
+`data/guests.json`.
 
 ## Running it
 

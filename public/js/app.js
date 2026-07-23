@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 6;
+const API_VERSION = 7;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {
@@ -275,6 +275,7 @@ async function route() {
 }
 
 /* ── Login & invite redemption ───────────────────────────────── */
+let loginPrefill = { name: "", email: "", guestEmail: "" }; // survive error re-renders
 function renderLogin(errorMsg) {
   view.innerHTML = `
     <div class="login-wrap">
@@ -291,11 +292,11 @@ function renderLogin(errorMsg) {
           <form id="login-form">
             <div class="form-field">
               <label for="l-name">Your name <span class="req">*</span></label>
-              <input id="l-name" type="text" autocomplete="name" placeholder="e.g. Ben Fields">
+              <input id="l-name" type="text" autocomplete="name" placeholder="e.g. Ben Fields" value="${esc(loginPrefill.name)}">
             </div>
             <div class="form-field">
               <label for="l-email">Email</label>
-              <input id="l-email" type="email" autocomplete="email" placeholder="you@pbk.com">
+              <input id="l-email" type="email" autocomplete="email" placeholder="you@pbk.com" value="${esc(loginPrefill.email)}">
             </div>
             <div class="form-field">
               <label for="l-code">Staff access code <span class="req">*</span></label>
@@ -305,15 +306,27 @@ function renderLogin(errorMsg) {
             </div>
             <button class="btn btn-primary" type="submit" style="width:100%; justify-content:center;">Sign In</button>
           </form>`}
-        <div class="login-guest-note">
-          Consultants and district collaborators: use the invite link from your PBK contact —
-          no sign-in needed.
-        </div>
+        <div class="login-divider" style="margin:20px 0 14px;">Consultants · Clients · Contractors</div>
+        <form id="guest-login">
+          <div class="form-field">
+            <label for="g-email">Email</label>
+            <input id="g-email" type="email" autocomplete="email" placeholder="you@yourfirm.com" value="${esc(loginPrefill.guestEmail)}">
+          </div>
+          <div class="form-field">
+            <label for="g-pass">Password</label>
+            <input id="g-pass" type="password" autocomplete="current-password">
+            <span class="hint">First time? Use the invite link from your PBK contact to create your
+            password. Forgot it? Ask them to reissue your link.</span>
+          </div>
+          <button class="btn btn-secondary" type="submit" style="width:100%; justify-content:center;">Collaborator Sign In</button>
+        </form>
       </div>
     </div>`;
   const form = document.getElementById("login-form");
   if (form) form.addEventListener("submit", async ev => {
     ev.preventDefault();
+    loginPrefill.name = document.getElementById("l-name").value;
+    loginPrefill.email = document.getElementById("l-email").value;
     try {
       await api("POST", "/api/login", {
         name: document.getElementById("l-name").value,
@@ -327,15 +340,36 @@ function renderLogin(errorMsg) {
       renderLogin(e.message);
     }
   });
+  const guestForm = document.getElementById("guest-login");
+  if (guestForm) guestForm.addEventListener("submit", async ev => {
+    ev.preventDefault();
+    loginPrefill.guestEmail = document.getElementById("g-email").value;
+    try {
+      const result = await api("POST", "/api/login/guest", {
+        email: document.getElementById("g-email").value,
+        password: document.getElementById("g-pass").value
+      });
+      ME = null;
+      await loadMe(true);
+      location.hash = result.projectId ? `#/project/${result.projectId}` : "#/";
+      route();
+    } catch (e) {
+      renderLogin(e.message);
+    }
+  });
 }
 
 async function renderInviteRedeem(token) {
   view.innerHTML = `<div class="login-wrap"><div class="card login-card"><h1>Opening your invite…</h1></div></div>`;
   try {
     const result = await api("POST", "/api/invites/redeem", { token });
-    ME = null;
-    await loadMe(true);
-    location.hash = `#/project/${result.projectId}`;
+    if (result.staff) { location.hash = `#/project/${result.projectId}`; return; }
+    if (result.requiresLogin) {
+      // Account already exists — the link is spent; sign in normally.
+      renderGuestLoginPrompt(result.email, result.projectName);
+      return;
+    }
+    renderActivateForm(token, result.email, result.projectName);
   } catch (e) {
     view.innerHTML = `
       <div class="login-wrap">
@@ -347,6 +381,87 @@ async function renderInviteRedeem(token) {
         </div>
       </div>`;
   }
+}
+
+function renderActivateForm(token, email, projectName, errorMsg) {
+  view.innerHTML = `
+    <div class="login-wrap">
+      <div class="card login-card">
+        <img src="/assets/logo.png" alt="PBK" class="login-logo">
+        <h1>Welcome</h1>
+        <p class="lede">You've been invited to collaborate on<br><b>${esc(projectName)}</b>.<br>
+        Create a password to finish setting up your access as <b>${esc(email)}</b>.</p>
+        ${errorMsg ? `<div class="form-errors">${esc(errorMsg)}</div>` : ""}
+        <form id="activate-form">
+          <div class="form-field">
+            <label for="a-name">Your name</label>
+            <input id="a-name" type="text" autocomplete="name" placeholder="e.g. Jordan Rivera">
+          </div>
+          <div class="form-field">
+            <label for="a-pass">Password <span class="req">*</span></label>
+            <input id="a-pass" type="password" autocomplete="new-password" minlength="8">
+            <span class="hint">At least 8 characters.</span>
+          </div>
+          <div class="form-field">
+            <label for="a-pass2">Confirm password <span class="req">*</span></label>
+            <input id="a-pass2" type="password" autocomplete="new-password">
+          </div>
+          <button class="btn btn-primary" type="submit" style="width:100%; justify-content:center;">Create Account &amp; Open Project</button>
+        </form>
+        <div class="login-guest-note">Afterwards, sign in any time — on any device — with your email and password.</div>
+      </div>
+    </div>`;
+  document.getElementById("activate-form").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const pass = document.getElementById("a-pass").value;
+    if (pass !== document.getElementById("a-pass2").value) {
+      return renderActivateForm(token, email, projectName, "Passwords don't match");
+    }
+    try {
+      const result = await api("POST", "/api/invites/activate", {
+        token, password: pass, name: document.getElementById("a-name").value
+      });
+      ME = null;
+      await loadMe(true);
+      location.hash = `#/project/${result.projectId}`;
+    } catch (e) {
+      renderActivateForm(token, email, projectName, e.message);
+    }
+  });
+}
+
+function renderGuestLoginPrompt(email, projectName, errorMsg) {
+  view.innerHTML = `
+    <div class="login-wrap">
+      <div class="card login-card">
+        <img src="/assets/logo.png" alt="PBK" class="login-logo">
+        <h1>Welcome Back</h1>
+        <p class="lede">Your account for <b>${esc(email)}</b> is already set up.<br>Sign in to open <b>${esc(projectName)}</b>.</p>
+        ${errorMsg ? `<div class="form-errors">${esc(errorMsg)}</div>` : ""}
+        <form id="guest-login-form">
+          <div class="form-field">
+            <label for="gl-pass">Password</label>
+            <input id="gl-pass" type="password" autocomplete="current-password">
+            <span class="hint">Forgot it? Ask your PBK project contact to reissue your invite link — opening the new link lets you set a new password.</span>
+          </div>
+          <button class="btn btn-primary" type="submit" style="width:100%; justify-content:center;">Sign In</button>
+        </form>
+      </div>
+    </div>`;
+  document.getElementById("guest-login-form").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    try {
+      const result = await api("POST", "/api/login/guest", {
+        email, password: document.getElementById("gl-pass").value
+      });
+      ME = null;
+      await loadMe(true);
+      location.hash = result.projectId ? `#/project/${result.projectId}` : "#/";
+      route();
+    } catch (e) {
+      renderGuestLoginPrompt(email, projectName, e.message);
+    }
+  });
 }
 
 /* ── Project list ────────────────────────────────────────────── */
@@ -947,7 +1062,7 @@ async function renderProject(id) {
       const freshUrl = fresh ? `${location.origin}${location.pathname}?invite=${fresh.token}` : "";
       const mailto = fresh ? `mailto:${encodeURIComponent(fresh.email)}` +
         `?subject=${encodeURIComponent(`Invitation to collaborate: ${project.name} — WSSP Tracker`)}` +
-        `&body=${encodeURIComponent(`You've been invited to collaborate on the WSSP scorecard for ${project.name}.\n\nOpen your invite link to get started — it signs you in automatically, no account needed:\n\n${freshUrl}\n\nThe link works once, on the device where you open it, so please don't forward it. You'll be able to update credit statuses, add notes, and upload supporting documentation for this project. If you need to sign in on another device, ask me to reissue your link.`)}` : "";
+        `&body=${encodeURIComponent(`You've been invited to collaborate on the WSSP scorecard for ${project.name}.\n\nOpen your invite link to set up your access — you'll create a password on your first visit:\n\n${freshUrl}\n\nAfter that, sign in any time at ${location.origin}${location.pathname} with your email address and password, from any device. You'll be able to update credit statuses, add notes, and upload supporting documentation for this project.\n\nIf you forget your password, let me know and I'll send you a fresh setup link.`)}` : "";
       return `
       <section class="card sharing-panel">
         <button type="button" class="sharing-close" id="close-sharing" title="Close sharing panel">&times;</button>
@@ -955,7 +1070,9 @@ async function renderProject(id) {
           <h2>Sharing &amp; Invitations</h2>
           <span>Invited collaborators can update this project's scorecard, notes, and documents —
           they can't edit project details, export the report, delete anything, or see other projects.
-          Each link signs in <b>once</b>: a forwarded copy of a used link won't work.</span>
+          The invite link is for <b>account setup</b>: the collaborator creates a password on first
+          visit, then signs in with their email from any device. Click a name to reissue a link
+          (which also serves as a password reset).</span>
         </div>
         ${fresh ? `
           <div class="invite-fresh">
@@ -978,7 +1095,7 @@ async function renderProject(id) {
                 <button type="button" class="invite-email invite-regen" data-invite="${inv.id}" data-email="${esc(inv.email)}"
                   title="Click to issue a replacement link for ${esc(inv.email)}">${esc(inv.email)}</button>
                 <span class="doc-meta">Invited ${new Date(inv.createdAt).toLocaleDateString()} by ${esc(inv.createdBy || "")}
-                  · ${inv.usedAt ? "link used " + new Date(inv.usedAt).toLocaleDateString() : "link not yet used"}${inv.regeneratedAt ? " · reissued " + new Date(inv.regeneratedAt).toLocaleDateString() : ""}</span>
+                  · ${inv.usedAt ? "account active since " + new Date(inv.usedAt).toLocaleDateString() : "awaiting account setup"}${inv.regeneratedAt ? " · link reissued " + new Date(inv.regeneratedAt).toLocaleDateString() : ""}</span>
                 <button type="button" class="btn btn-quiet invite-revoke" data-invite="${inv.id}">Revoke</button>
               </div>`).join("")}
           </div>

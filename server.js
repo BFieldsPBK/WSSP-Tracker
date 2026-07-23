@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 6;
+const API_VERSION = 7;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -87,6 +87,21 @@ if (fs.existsSync(PROJECTS_FILE)) {
 }
 function saveProjects() {
   writeFileAtomic(PROJECTS_FILE, JSON.stringify(projects, null, 2));
+}
+
+/* Guest accounts: email -> {passwordHash, salt, name, createdAt, updatedAt}.
+ * Created by the account-setup invite link; a guest's project access is
+ * whatever active invites exist for their email across all projects. */
+const GUESTS_FILE = path.join(DATA_DIR, "guests.json");
+let guests = {};
+if (fs.existsSync(GUESTS_FILE)) {
+  guests = JSON.parse(fs.readFileSync(GUESTS_FILE, "utf8"));
+}
+function saveGuests() {
+  writeFileAtomic(GUESTS_FILE, JSON.stringify(guests, null, 2));
+}
+function hashPassword(password, salt) {
+  return crypto.scryptSync(password, salt, 64).toString("hex");
 }
 
 /* ── Auth ────────────────────────────────────────────────────── *
@@ -180,15 +195,17 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname, "public")));
 
 function isStaff(req) { return !!req.user && req.user.kind === "staff"; }
-/* A guest grant is {p: projectId, inv: inviteId}; valid only while the
- * invite it came from still exists and is not revoked. */
+/* A guest's access is derived from their email on every request: every
+ * project holding an active (non-revoked) invite for that email. Inviting
+ * an existing guest to another project grants access instantly; revoking
+ * cuts it just as fast. */
+function guestProjects(email) {
+  if (!email) return [];
+  return projects.filter(p => (p.invites || []).some(i => !i.revoked && i.email === email));
+}
 function validGrants(req) {
   if (!req.user || req.user.kind !== "guest") return [];
-  return (req.user.grants || []).filter(g => {
-    const proj = projects.find(x => x.id === g.p);
-    const inv = proj && (proj.invites || []).find(i => i.id === g.inv);
-    return inv && !inv.revoked;
-  });
+  return guestProjects(req.user.email).map(p => ({ p: p.id }));
 }
 function canAccess(req, projectId) {
   return isStaff(req) || validGrants(req).some(g => g.p === projectId);
@@ -313,39 +330,91 @@ app.delete("/api/projects/:id/invites/:inviteId", (req, res) => {
   res.json(projectView(p, req));
 });
 
-app.post("/api/invites/redeem", (req, res) => {
-  const token = String((req.body || {}).token || "");
-  if (!token) return res.status(400).json({ errors: ["Missing invite token"] });
+/* Locate a live invite by its raw token. Returns {project, invite} or a
+ * response-sending falsy result. */
+function findInviteByToken(res, token) {
+  if (!token) { res.status(400).json({ errors: ["Missing invite token"] }); return null; }
   const h = sha256(token);
   for (const p of projects) {
     const inv = (p.invites || []).find(i => i.tokenHash === h);
-    if (!inv) continue;
-    if (inv.revoked) {
-      return res.status(410).json({ errors: ["This invite link has been revoked. Contact your PBK project contact for a new one."] });
+    if (inv) {
+      if (inv.revoked) {
+        res.status(410).json({ errors: ["This invite link has been revoked. Contact your PBK project contact for a new one."] });
+        return null;
+      }
+      return { project: p, invite: inv };
     }
-    // Staff previewing a link neither consumes it nor downgrades their session.
-    if (isStaff(req)) return res.json({ projectId: p.id, projectName: p.name, staff: true });
-    // Links are single-use: the first redemption claims it. The holder's own
-    // session may re-redeem (e.g. re-clicking the email), but a forwarded
-    // copy of an already-used link is dead.
-    const alreadyMine = validGrants(req).some(g => g.inv === inv.id);
-    if (inv.usedAt && !alreadyMine) {
-      return res.status(410).json({ errors: ["This invite link has already been used. For security, each link works once — ask your PBK project contact to reissue yours."] });
-    }
-    if (!inv.usedAt) inv.usedAt = new Date().toISOString();
-    inv.lastUsedAt = new Date().toISOString();
-    saveProjects();
-    // Merge into any existing guest session so one consultant can hold
-    // invites to several projects at once.
-    const gs = validGrants(req).filter(g => g.p !== p.id);
-    gs.push({ p: p.id, inv: inv.id });
-    setSession(res, {
-      kind: "guest", name: inv.email, email: inv.email,
-      grants: gs, exp: Date.now() + GUEST_SESSION_MS
-    });
-    return res.json({ projectId: p.id, projectName: p.name });
   }
   res.status(404).json({ errors: ["Invite link not recognized. It may have been replaced — ask your PBK contact for a current link."] });
+  return null;
+}
+
+/* Step 1 of the invite flow: tells the frontend whether this link should
+ * show account setup (first visit / password reset) or a sign-in prompt. */
+app.post("/api/invites/redeem", (req, res) => {
+  const found = findInviteByToken(res, String((req.body || {}).token || ""));
+  if (!found) return;
+  const { project, invite } = found;
+  // Staff previewing a link neither consumes it nor downgrades their session.
+  if (isStaff(req)) return res.json({ staff: true, projectId: project.id, projectName: project.name });
+  if (invite.usedAt && guests[invite.email]) {
+    // Account already set up — this link is spent; sign in instead.
+    return res.json({ requiresLogin: true, email: invite.email, projectName: project.name });
+  }
+  return res.json({ setPassword: true, email: invite.email, projectName: project.name });
+});
+
+/* Step 2 (first visit or staff-reissued reset link): set the password.
+ * Consumes the link — afterwards access is by email + password sign-in. */
+app.post("/api/invites/activate", (req, res) => {
+  const { token, password, name } = req.body || {};
+  const found = findInviteByToken(res, String(token || ""));
+  if (!found) return;
+  const { project, invite } = found;
+  if (invite.usedAt && guests[invite.email]) {
+    return res.status(410).json({ errors: ["This link was already used to set up the account. Sign in with your email and password, or ask your PBK contact to reissue the link if you need a password reset."] });
+  }
+  if (!password || String(password).length < 8) {
+    return res.status(400).json({ errors: ["Password must be at least 8 characters"] });
+  }
+  const salt = crypto.randomBytes(16).toString("hex");
+  guests[invite.email] = {
+    passwordHash: hashPassword(String(password), salt),
+    salt,
+    name: String(name || "").trim().slice(0, 80) || (guests[invite.email]?.name ?? ""),
+    createdAt: guests[invite.email]?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  saveGuests();
+  invite.usedAt = new Date().toISOString();
+  invite.lastUsedAt = invite.usedAt;
+  saveProjects();
+  setSession(res, {
+    kind: "guest", email: invite.email, name: guests[invite.email].name || invite.email,
+    exp: Date.now() + GUEST_SESSION_MS
+  });
+  res.json({ projectId: project.id, projectName: project.name });
+});
+
+/* Collaborator sign-in with email + password (any device, any time). */
+app.post("/api/login/guest", (req, res) => {
+  const email = String((req.body || {}).email || "").trim().toLowerCase();
+  const password = String((req.body || {}).password || "");
+  const acc = guests[email];
+  if (!acc || !password) {
+    return res.status(401).json({ errors: ["Invalid email or password"] });
+  }
+  const attempt = hashPassword(password, acc.salt);
+  if (attempt.length !== acc.passwordHash.length ||
+      !crypto.timingSafeEqual(Buffer.from(attempt), Buffer.from(acc.passwordHash))) {
+    return res.status(401).json({ errors: ["Invalid email or password"] });
+  }
+  setSession(res, {
+    kind: "guest", email, name: acc.name || email,
+    exp: Date.now() + GUEST_SESSION_MS
+  });
+  const granted = guestProjects(email);
+  res.json({ ok: true, projectId: granted[0]?.id || null });
 });
 
 app.get("/api/protocols", (req, res) => {
