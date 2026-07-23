@@ -709,9 +709,11 @@ legend {
 }
 .status-seg button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
 .status-seg button:last-child { border-radius: 0 6px 6px 0; }
-.status-seg button.on-yes   { background: var(--status-yes-bg);   color: var(--status-yes);   border-color: var(--status-yes); z-index: 1; }
-.status-seg button.on-maybe { background: var(--status-maybe-bg); color: var(--status-maybe); border-color: var(--status-maybe); z-index: 1; }
-.status-seg button.on-no    { background: var(--status-no-bg);    color: var(--status-no);    border-color: var(--status-no); z-index: 1; }
+.status-seg button { font-size: 12px; padding: 4px 8px; white-space: nowrap; }
+.status-seg button.on-yes      { background: var(--status-yes-bg);   color: var(--status-yes);   border-color: var(--status-yes); z-index: 1; }
+.status-seg button.on-maybeYes { background: var(--status-maybe-bg); color: var(--status-maybe); border-color: var(--status-maybe); z-index: 1; }
+.status-seg button.on-maybeNo  { background: #f5efd8; color: #8a6d1f; border-color: #c9b45e; z-index: 1; }
+.status-seg button.on-no       { background: var(--status-no-bg);    color: var(--status-no);    border-color: var(--status-no); z-index: 1; }
 
 .points-select {
   font-family: var(--pbk-font);
@@ -1018,6 +1020,88 @@ legend {
   padding-top: 10px;
   font-size: 11.5px;
   color: var(--pbk-faint);
+}
+
+/* ── Project dashboard ─────────────────────────────────────────── */
+.dash { padding: 30px 36px; }
+.dash-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  border-bottom: 3px solid var(--pbk-primary);
+  padding-bottom: 14px;
+  margin-bottom: 8px;
+}
+.dash-head h1 { margin: 0; }
+.dash-sub { font-size: 13px; color: var(--pbk-muted); margin-top: 2px; }
+.dash-section-title {
+  font-family: var(--pbk-font-heading);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--pbk-ink);
+  margin: 22px 0 6px;
+}
+.dash-overall {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+.dash-gauge-block { text-align: center; }
+.dash-gauge-block .gauge { max-width: 300px; width: 100%; height: auto; }
+.dash-gauge-caption { font-size: 13px; color: var(--pbk-body); max-width: 360px; margin: 0 auto; }
+.dash-gauge-caption b { color: var(--pbk-ink); }
+.dash-note { display: block; font-size: 11.5px; color: var(--pbk-muted); margin-top: 4px; }
+.dash-eui-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 190px;
+  color: var(--pbk-muted);
+  font-size: 13.5px;
+  background: var(--pbk-bg-pale);
+  border-radius: var(--pbk-radius);
+  margin-bottom: 8px;
+  padding: 16px;
+}
+.dash-legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--pbk-body);
+  margin-bottom: 12px;
+}
+.dash-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.dash-legend .dash-note { margin: 0; flex-basis: 100%; }
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+.dash-cat { padding: 14px 10px 16px; text-align: center; }
+.dash-cat .gauge { max-width: 170px; width: 100%; height: auto; }
+.dash-cat-name {
+  font-family: var(--pbk-font-heading);
+  font-weight: 700;
+  font-size: 14.5px;
+  color: var(--pbk-ink);
+  margin-top: 2px;
+}
+.dash-cat-sub { font-size: 12px; color: var(--pbk-muted); }
+.g-center { font-family: var(--pbk-font-heading); font-size: 30px; font-weight: 700; fill: var(--pbk-ink); }
+.g-center-sub { font-size: 11px; fill: var(--pbk-muted); }
+.g-seglabel { font-size: 10.5px; font-weight: 600; fill: var(--pbk-body); }
+.g-marklabel { font-size: 9.5px; font-weight: 600; fill: var(--pbk-body); }
+
+@media print {
+  .dash { border: none; box-shadow: none; padding: 0; }
+  .dash-grid { grid-template-columns: repeat(3, 1fr); }
+  .dash-cat { break-inside: avoid; }
 }
 
 @media print {

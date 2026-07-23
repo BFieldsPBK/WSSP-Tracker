@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 7;
+const API_VERSION = 8;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {
@@ -146,6 +146,26 @@ const D_PHASES = [
     note: "Report energy and water use through EPA Energy Star Portfolio Manager for five consecutive years after board acceptance." }
 ];
 
+/* WSSP 2023 handbook E1.2 (Clean Buildings Performance Standard): Adjusted
+ * New Construction / Alteration EUI targets (kBtu/sf/yr) by climate zone,
+ * school level (ES/MS share a column), and average weekly operating hours.
+ * Source: WSSP 2023 Tables 1–4, pages 52–54. */
+const EUI_TARGETS = {
+  nc:  { "50": { "4C": { esms: 30.9, hs: 30.2 }, "5B": { esms: 38.3, hs: 37.5 } },
+         "167": { "4C": { esms: 37.7, hs: 37.0 }, "5B": { esms: 46.8, hs: 45.8 } } },
+  alt: { "50": { "4C": { esms: 37.5, hs: 36.7 }, "5B": { esms: 38.3, hs: 37.5 } },
+         "167": { "4C": { esms: 45.8, hs: 44.9 }, "5B": { esms: 46.8, hs: 45.8 } } }
+};
+const SCHOOL_LEVEL_NAMES = { es: "Elementary", ms: "Middle School", hs: "High School", other: "Other" };
+function wsspEuiTarget(project) {
+  const kind = project.projectType === "modernization" ? "alt" : "nc";
+  const hours = project.opHours || "50";
+  const level = project.schoolLevel === "hs" ? "hs"
+    : (project.schoolLevel === "es" || project.schoolLevel === "ms") ? "esms" : null;
+  if (!level || !project.climateZone) return null;
+  return EUI_TARGETS[kind]?.[hours]?.[project.climateZone]?.[level] ?? null;
+}
+
 /* Normalize stored/legacy values ("D4", "d-5 ", "D11") to canonical keys. */
 function normalizeDPhase(v) {
   if (!v) return "";
@@ -179,29 +199,40 @@ function eachCredit(protocol, fn) {
       }
 }
 
-/* Points actually claimed for one credit entry. */
+/* The four scorecard statuses, in display order. "maybeYes" and "maybeNo"
+ * both mean undecided; maybeYes counts toward potential points. */
+const STATUSES = ["yes", "maybeYes", "maybeNo", "no"];
+const STATUS_LABELS = { yes: "Yes", maybeYes: "Maybe Yes", maybeNo: "Maybe No", no: "No" };
+const STATUS_COLORS = { yes: "#31493c", maybeYes: "#748b58", maybeNo: "#d9bd5f", no: "#9aa4ad", rest: "#eef2f5" };
+
+/* Points actually claimed for one credit entry (yes / maybeYes earn). */
 function entryPoints(entry, pts) {
-  if (!entry || entry.status === "no") return 0;
+  if (!entry || entry.status === "no" || entry.status === "maybeNo") return 0;
   if (pts.max === 0) return 0;
   return entry.points !== undefined ? entry.points : pts.max === pts.min ? pts.max : 0;
 }
 
 function computeScore(protocol, project) {
-  const s = {
-    yes: 0, maybe: 0,
-    reqTotal: 0, reqMet: 0,
-    byCategory: {}
-  };
+  const blank = () => ({
+    yes: 0, maybeYes: 0,                    // claimed points
+    maybeNoMax: 0, noMax: 0,                // possible points in leaning-no / no credits
+    nYes: 0, nMaybeYes: 0, nMaybeNo: 0, nNo: 0,
+    reqTotal: 0, reqMet: 0
+  });
+  const s = { ...blank(), byCategory: {} };
   eachCredit(protocol, ({ id, pts, category }) => {
-    const c = s.byCategory[category.id] || (s.byCategory[category.id] = { yes: 0, maybe: 0, reqTotal: 0, reqMet: 0 });
+    const c = s.byCategory[category.id] || (s.byCategory[category.id] = blank());
     const entry = project.credits[id];
     if (pts.required) {
       s.reqTotal++; c.reqTotal++;
       if (entry && entry.status === "yes") { s.reqMet++; c.reqMet++; }
     }
     const p = entryPoints(entry, pts);
-    if (entry && entry.status === "yes")   { s.yes += p;   c.yes += p; }
-    if (entry && entry.status === "maybe") { s.maybe += p; c.maybe += p; }
+    if (!entry) return;
+    if (entry.status === "yes")      { s.yes += p;      c.yes += p;      s.nYes++;      c.nYes++; }
+    if (entry.status === "maybeYes") { s.maybeYes += p; c.maybeYes += p; s.nMaybeYes++; c.nMaybeYes++; }
+    if (entry.status === "maybeNo")  { s.maybeNoMax += pts.max; c.maybeNoMax += pts.max; s.nMaybeNo++; c.nMaybeNo++; }
+    if (entry.status === "no")       { s.noMax += pts.max;      c.noMax += pts.max;      s.nNo++;      c.nNo++; }
   });
   return s;
 }
@@ -262,6 +293,8 @@ async function route() {
     }
     if (hash === "#/new") return renderProjectForm();
     if (hash === "#/reference") return renderReference();
+    m = hash.match(/^#\/project\/([a-z0-9]+)\/dashboard$/);
+    if (m) return renderDashboard(m[1]);
     m = hash.match(/^#\/project\/([a-z0-9]+)\/report$/);
     if (m) return isStaffUser() ? renderReport(m[1]) : renderProject(m[1]);
     m = hash.match(/^#\/project\/([a-z0-9]+)\/edit$/);
@@ -654,6 +687,44 @@ async function renderProjectForm(id) {
         </div>
       </fieldset>
 
+      <fieldset>
+        <legend>School &amp; Energy (Dashboard)</legend>
+        <div class="form-row">
+          <div class="form-field">
+            <label for="f-schoolLevel">School level</label>
+            <select id="f-schoolLevel" name="schoolLevel">
+              <option value="">Not set</option>
+              ${Object.entries(SCHOOL_LEVEL_NAMES).map(([v, n]) =>
+                `<option value="${v}" ${project.schoolLevel === v ? "selected" : ""}>${n}</option>`).join("")}
+            </select>
+            <span class="hint">Sets the WSSP EUI target (ES/MS share one target; HS has its own).</span>
+          </div>
+          <div class="form-field">
+            <label for="f-climateZone">Climate zone</label>
+            <select id="f-climateZone" name="climateZone">
+              <option value="">Not set</option>
+              <option value="4C" ${project.climateZone === "4C" ? "selected" : ""}>4C — Western Washington</option>
+              <option value="5B" ${project.climateZone === "5B" ? "selected" : ""}>5B — Eastern Washington</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label for="f-opHours">Average weekly operating hours</label>
+            <select id="f-opHours" name="opHours">
+              <option value="50" ${(project.opHours || "50") === "50" ? "selected" : ""}>50 hours or less</option>
+              <option value="167" ${project.opHours === "167" ? "selected" : ""}>51 to 167 hours</option>
+            </select>
+            <span class="hint">Per the CBPS tables in WSSP 2023 credit E1.2.</span>
+          </div>
+          <div class="form-field"></div>
+        </div>
+        <div class="form-row">
+          ${field("baselineEUI", "Baseline EUI (kBtu/sf/yr)", { placeholder: "e.g. 46", hint: "Modeled baseline, e.g. from the ELCCA." })}
+          ${field("projectedEUI", "Projected EUI (kBtu/sf/yr)", { placeholder: "e.g. 30", hint: "Predicted EUI of the proposed design (pEUI)." })}
+        </div>
+      </fieldset>
+
       <div class="form-actions">
         <a class="btn btn-secondary" href="${editing ? "#/project/" + id : "#/"}">Cancel</a>
         <button class="btn btn-primary" type="submit">${editing ? "Save Changes" : "Create Project"}</button>
@@ -719,6 +790,190 @@ async function renderReference() {
   `;
 }
 
+/* ── Project dashboard (gauges) ──────────────────────────────── */
+/* Gauge geometry: 270° arc opening at the bottom, from 135° to 405°. */
+const GAUGE_START = 135, GAUGE_SWEEP = 270;
+function polar(cx, cy, r, deg) {
+  const rad = (deg * Math.PI) / 180;
+  return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+}
+function arcPath(cx, cy, r, a0, a1) {
+  const [x0, y0] = polar(cx, cy, r, a0);
+  const [x1, y1] = polar(cx, cy, r, a1);
+  return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+}
+/* A segmented gauge: segments = [{value, color, label?}], domain = total.
+ * Draws a full track, then each nonzero segment with a 2° gap, with the
+ * segment's value labeled just outside its midpoint. */
+function gaugeSvg({ size = 190, stroke = 26, domain, segments, centerTop, centerBottom, marker }) {
+  const cx = size / 2, cy = size / 2, r = (size - stroke) / 2 - 14;
+  const toAngle = v => GAUGE_START + GAUGE_SWEEP * Math.max(0, Math.min(1, v / domain));
+  let acc = 0;
+  const parts = [`<path d="${arcPath(cx, cy, r, GAUGE_START, GAUGE_START + GAUGE_SWEEP)}"
+    stroke="${STATUS_COLORS.rest}" stroke-width="${stroke}" fill="none" stroke-linecap="round"/>`];
+  const labels = [];
+  for (const seg of segments) {
+    if (!seg.value || seg.value <= 0) { continue; }
+    const a0 = toAngle(acc), a1 = toAngle(acc + seg.value);
+    const gap = Math.min(1, (a1 - a0) / 4);
+    parts.push(`<path d="${arcPath(cx, cy, r, a0 + gap, Math.max(a0 + gap + .5, a1 - gap))}"
+      stroke="${seg.color}" stroke-width="${stroke}" fill="none"/>`);
+    const [lx, ly] = polar(cx, cy, r + stroke / 2 + 9, (a0 + a1) / 2);
+    labels.push(`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" class="g-seglabel"
+      text-anchor="middle" dominant-baseline="middle">${seg.value}</text>`);
+    acc += seg.value;
+  }
+  let markerSvg = "";
+  if (marker && marker.value > 0 && marker.value <= domain) {
+    const a = toAngle(marker.value);
+    const [mx0, my0] = polar(cx, cy, r - stroke / 2 - 3, a);
+    const [mx1, my1] = polar(cx, cy, r + stroke / 2 + 3, a);
+    const [tx, ty] = polar(cx, cy, r + stroke / 2 + 14, a);
+    markerSvg = `<line x1="${mx0.toFixed(1)}" y1="${my0.toFixed(1)}" x2="${mx1.toFixed(1)}" y2="${my1.toFixed(1)}"
+        stroke="#b8241f" stroke-width="2.5" stroke-dasharray="4 3"/>
+      <text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" class="g-marklabel" text-anchor="middle"
+        dominant-baseline="middle">${esc(marker.label)}</text>`;
+  }
+  return `<svg viewBox="-14 -10 ${size + 28} ${size + 20}" class="gauge" role="img">
+    ${parts.join("")}${labels.join("")}${markerSvg}
+    <text x="${cx}" y="${cy - 4}" class="g-center" text-anchor="middle">${esc(centerTop)}</text>
+    <text x="${cx}" y="${cy + 16}" class="g-center-sub" text-anchor="middle">${esc(centerBottom)}</text>
+  </svg>`;
+}
+/* EUI gauge: values run baseline (left) down to 0 (right) with reference
+ * ticks; the needle marks the projected EUI. */
+function euiGaugeSvg({ size = 190, stroke = 20, maxVal, baseline, projected, ticks }) {
+  const cx = size / 2, cy = size / 2, r = (size - stroke) / 2 - 16;
+  const toAngle = v => GAUGE_START + GAUGE_SWEEP * Math.max(0, Math.min(1, (maxVal - v) / maxVal));
+  const parts = [`<path d="${arcPath(cx, cy, r, GAUGE_START, GAUGE_START + GAUGE_SWEEP)}"
+    stroke="${STATUS_COLORS.rest}" stroke-width="${stroke}" fill="none" stroke-linecap="round"/>`];
+  // green "meets WSSP target" zone from the WSSP tick down to zero
+  const wssp = ticks.find(t => t.key === "wssp");
+  if (wssp) {
+    parts.push(`<path d="${arcPath(cx, cy, r, toAngle(wssp.value), GAUGE_START + GAUGE_SWEEP)}"
+      stroke="#c9d8c4" stroke-width="${stroke}" fill="none"/>`);
+  }
+  const tickSvg = ticks.map(t => {
+    const a = toAngle(t.value);
+    const [x0, y0] = polar(cx, cy, r - stroke / 2 - 3, a);
+    const [x1, y1] = polar(cx, cy, r + stroke / 2 + 3, a);
+    const [tx, ty] = polar(cx, cy, r + stroke / 2 + 15, a);
+    return `<line x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}"
+        stroke="#54606b" stroke-width="2"/>
+      <text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" class="g-marklabel" text-anchor="middle"
+        dominant-baseline="middle">${esc(t.label)}</text>`;
+  }).join("");
+  let needle = "";
+  if (projected != null) {
+    const a = toAngle(projected);
+    const [nx, ny] = polar(cx, cy, r + stroke / 2, a);
+    const [bx0, by0] = polar(cx, cy, 12, a - 90);
+    const [bx1, by1] = polar(cx, cy, 12, a + 90);
+    needle = `<polygon points="${nx.toFixed(1)},${ny.toFixed(1)} ${bx0.toFixed(1)},${by0.toFixed(1)} ${bx1.toFixed(1)},${by1.toFixed(1)}"
+      fill="#263a46"/><circle cx="${cx}" cy="${cy}" r="7" fill="#263a46"/>`;
+  }
+  return `<svg viewBox="-34 -12 ${size + 68} ${size + 24}" class="gauge" role="img">
+    ${parts.join("")}${tickSvg}${needle}
+    <text x="${cx}" y="${cy + 34}" class="g-center" text-anchor="middle">${projected ?? "—"}</text>
+    <text x="${cx}" y="${cy + 52}" class="g-center-sub" text-anchor="middle">projected EUI</text>
+  </svg>`;
+}
+
+async function renderDashboard(id) {
+  const [project, protocols] = await Promise.all([api("GET", `/api/projects/${id}`), loadProtocols()]);
+  const protocol = protocols[project.protocolId];
+  if (!protocol) throw new Error(`Unknown protocol: ${project.protocolId}`);
+  const staff = isStaffUser();
+  const goal = threshold(protocol, project);
+  const score = computeScore(protocol, project);
+  const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
+  const catCard = cat => {
+    const c = score.byCategory[cat.id] || {};
+    const segs = [
+      { value: c.yes || 0, color: STATUS_COLORS.yes },
+      { value: c.maybeYes || 0, color: STATUS_COLORS.maybeYes },
+      { value: c.maybeNoMax || 0, color: STATUS_COLORS.maybeNo },
+      { value: c.noMax || 0, color: STATUS_COLORS.no }
+    ];
+    return `
+      <div class="card dash-cat">
+        ${gaugeSvg({ size: 180, stroke: 22, domain: cat.total, segments: segs,
+          centerTop: String(c.yes || 0), centerBottom: "Yes pts" })}
+        <div class="dash-cat-name">${esc(cat.name)}</div>
+        <div class="dash-cat-sub">${cat.total} points possible</div>
+      </div>`;
+  };
+
+  const baseline = Number(project.baselineEUI) || null;
+  const projected = Number(project.projectedEUI) || null;
+  const wsspTarget = wsspEuiTarget(project);
+  const euiReady = baseline && projected;
+  const euiTicks = [];
+  if (baseline) euiTicks.push({ key: "base", value: baseline, label: `Baseline ${baseline}` });
+  if (wsspTarget) euiTicks.push({ key: "wssp", value: wsspTarget, label: `WSSP ${wsspTarget}` });
+  if (baseline) euiTicks.push({ key: "aia", value: +(baseline * 0.2).toFixed(1), label: "AIA 2030" });
+  euiTicks.push({ key: "nz", value: 0, label: "Net Zero" });
+
+  view.innerHTML = `
+    <div class="no-print" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; gap:10px; flex-wrap:wrap;">
+      <div class="breadcrumbs" style="margin:0;">${staff ? `<a href="#/">Projects</a> / ` : ""}<a href="#/project/${id}">${esc(project.name)}</a> / Dashboard</div>
+      <div style="display:flex; gap:10px;">
+        <a class="btn btn-secondary" href="#/project/${id}">Back to Scorecard</a>
+        <button class="btn btn-primary" onclick="window.print()">Print / Save as PDF</button>
+      </div>
+    </div>
+
+    <div class="dash card">
+      <header class="dash-head">
+        <div>
+          <h1>${esc(project.name)}</h1>
+          <div class="dash-sub">WSSP Design Dashboard · ${esc(protocol.name)} · ${esc(PROJECT_TYPE_NAMES[project.projectType])}${project.schoolLevel && SCHOOL_LEVEL_NAMES[project.schoolLevel] ? " · " + SCHOOL_LEVEL_NAMES[project.schoolLevel] : ""} · ${today}</div>
+        </div>
+        <img src="/assets/logo.png" alt="PBK" class="report-logo">
+      </header>
+
+      <div class="dash-section-title">Overall Scores</div>
+      <div class="dash-overall">
+        <div class="dash-gauge-block">
+          ${gaugeSvg({ size: 230, stroke: 30, domain: protocol.grandTotal,
+            segments: [
+              { value: score.yes, color: STATUS_COLORS.yes },
+              { value: score.maybeYes, color: STATUS_COLORS.maybeYes }
+            ],
+            centerTop: String(score.yes), centerBottom: "Total points (Yes)",
+            marker: goal ? { value: goal, label: `Min ${goal}` } : null })}
+          <div class="dash-gauge-caption">
+            <b>Total Points</b> — Yes ${score.yes} · with Maybe Yes ${score.yes + score.maybeYes}
+            · minimum required ${goal ?? "—"} · ${protocol.grandTotal} possible
+          </div>
+        </div>
+        <div class="dash-gauge-block">
+          ${euiReady
+            ? euiGaugeSvg({ maxVal: Math.max(baseline, wsspTarget || 0) * 1.05, baseline, projected, ticks: euiTicks })
+            : `<div class="dash-eui-empty">EUI gauge needs <b>Baseline EUI</b> and <b>Projected EUI</b>${staff ? " — add them under Edit Details" : ""}.</div>`}
+          <div class="dash-gauge-caption">
+            <b>EUI</b> (kBtu/sf/yr)${baseline ? ` — baseline ${baseline}` : ""}${projected ? ` · projected ${projected}` : ""}${wsspTarget ? ` · WSSP target ${wsspTarget}` : ""}
+            ${wsspTarget ? `<span class="dash-note">WSSP target: CBPS adjusted NC/alteration EUIt for ${esc(project.climateZone)} ${esc(SCHOOL_LEVEL_NAMES[project.schoolLevel] || "")} (WSSP 2023, E1.2). AIA 2030 marker = 80% reduction from baseline.</span>`
+              : `<span class="dash-note">Set school level and climate zone in project details to place the WSSP target marker.</span>`}
+          </div>
+        </div>
+      </div>
+
+      <div class="dash-section-title">Points per Category</div>
+      <div class="dash-legend">
+        ${STATUSES.map(st => `<span><span class="dot" style="background:${STATUS_COLORS[st]}"></span>${STATUS_LABELS[st]}</span>`).join("")}
+        <span><span class="dot" style="background:${STATUS_COLORS.rest}; border:1px solid #d6dadc;"></span>Unmarked</span>
+        <span class="dash-note">Yes / Maybe Yes segments show claimed points; Maybe No / No show those credits' possible points.</span>
+      </div>
+      <div class="dash-grid">
+        ${protocol.categories.map(catCard).join("")}
+      </div>
+      <div class="report-footer">Generated by the PBK WSSP Tracker · ${today} · Required credits met: ${score.reqMet}/${score.reqTotal}</div>
+    </div>
+  `;
+}
+
 /* ── OSPI export report ──────────────────────────────────────── */
 async function renderReport(id) {
   const [project, protocols] = await Promise.all([api("GET", `/api/projects/${id}`), loadProtocols()]);
@@ -732,31 +987,33 @@ async function renderReport(id) {
   const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
   const mark = (entry, pts) => {
-    if (!entry) return ["", "", ""];
+    if (!entry) return ["", "", "", ""];
     const p = entryPoints(entry, pts);
     const cell = pts.max > 0 ? (p || "✓") : "✓";
-    if (entry.status === "yes") return [cell, "", ""];
-    if (entry.status === "maybe") return ["", cell, ""];
-    if (entry.status === "no") return ["", "", "✓"];
-    return ["", "", ""];
+    if (entry.status === "yes") return [cell, "", "", ""];
+    if (entry.status === "maybeYes") return ["", cell, "", ""];
+    if (entry.status === "maybeNo") return ["", "", "✓", ""];
+    if (entry.status === "no") return ["", "", "", "✓"];
+    return ["", "", "", ""];
   };
 
   const catTable = cat => {
-    const c = score.byCategory[cat.id] || { yes: 0, maybe: 0, reqTotal: 0, reqMet: 0 };
+    const c = score.byCategory[cat.id] || { yes: 0, maybeYes: 0, reqTotal: 0, reqMet: 0 };
     const rows = cat.groups.map(g =>
-      `<tr class="group-row"><td colspan="6">${esc(g.name)}</td></tr>` +
+      `<tr class="group-row"><td colspan="7">${esc(g.name)}</td></tr>` +
       g.credits.map(([cid, cname, spec]) => {
         const pts = parsePoints(spec);
         if (pts.header) {
-          return `<tr class="parent-row"><td>${esc(cid)}</td><td colspan="5">${esc(cname)}</td></tr>`;
+          return `<tr class="parent-row"><td>${esc(cid)}</td><td colspan="6">${esc(cname)}</td></tr>`;
         }
-        const [y, m, n] = mark(project.credits[cid], pts);
+        const [y, my, mn, n] = mark(project.credits[cid], pts);
         return `<tr>
           <td>${esc(cid)}</td>
           <td>${esc(cname)}</td>
           <td class="num">${esc(pts.label)}</td>
           <td class="num">${y}</td>
-          <td class="num">${m}</td>
+          <td class="num">${my}</td>
+          <td class="num">${mn}</td>
           <td class="num">${n}</td>
         </tr>`;
       }).join("")
@@ -764,7 +1021,7 @@ async function renderReport(id) {
     return `
       <table class="report-table">
         <thead>
-          <tr class="cat-row"><th colspan="2">${esc(cat.name)}</th><th class="num">Possible<br>Points</th><th class="num">Yes</th><th class="num">Maybe</th><th class="num">No</th></tr>
+          <tr class="cat-row"><th colspan="2">${esc(cat.name)}</th><th class="num">Possible<br>Points</th><th class="num">Yes</th><th class="num">Maybe<br>Yes</th><th class="num">Maybe<br>No</th><th class="num">No</th></tr>
         </thead>
         <tbody>
           ${rows}
@@ -772,7 +1029,8 @@ async function renderReport(id) {
             <td colspan="2">Total possible: ${cat.total}</td>
             <td class="num"></td>
             <td class="num">${c.yes}</td>
-            <td class="num">${c.maybe}</td>
+            <td class="num">${c.maybeYes}</td>
+            <td class="num"></td>
             <td class="num"></td>
           </tr>
         </tbody>
@@ -826,7 +1084,7 @@ async function renderReport(id) {
 
       <div class="report-summary">
         <div><span class="num-lg">${score.yes}</span>Points earned (Yes)</div>
-        <div><span class="num-lg">${score.maybe}</span>Points potential (Maybe)</div>
+        <div><span class="num-lg">${score.maybeYes}</span>Points potential (Maybe Yes)</div>
         <div><span class="num-lg">${goal ?? "—"}</span>Minimum required</div>
         <div><span class="num-lg">${score.reqMet}/${score.reqTotal}</span>Required credits met</div>
       </div>
@@ -839,7 +1097,8 @@ async function renderReport(id) {
             <td colspan="2">GRAND TOTAL — Possible points: ${protocol.grandTotal} (most points possible, not a total of all points listed)</td>
             <td class="num"></td>
             <td class="num">${score.yes}</td>
-            <td class="num">${score.maybe}</td>
+            <td class="num">${score.maybeYes}</td>
+            <td class="num"></td>
             <td class="num"></td>
           </tr>
         </tbody>
@@ -915,7 +1174,7 @@ async function renderProject(id) {
         const entry = project.credits[cid];
         const status = entry ? entry.status : "none";
         const chosen = entryPoints(entry, pts);
-        const canPickPoints = pts.max > 0 && pts.max !== pts.min && (status === "yes" || status === "maybe");
+        const canPickPoints = pts.max > 0 && pts.max !== pts.min && (status === "yes" || status === "maybeYes");
         const pointsSel = canPickPoints ? `
           <select class="points-select" data-credit="${cid}" aria-label="Points for ${esc(cid)}">
             ${Array.from({ length: pts.max }, (_, i) => i + 1).map(n =>
@@ -973,9 +1232,8 @@ async function renderProject(id) {
             </button>
             <span class="credit-pts">${pts.max > 0 ? esc(pts.label) : "Req"}</span>
             <span class="status-seg" data-credit="${cid}" role="group" aria-label="Status for ${esc(cid)}">
-              <button type="button" data-status="yes"   class="${status === "yes" ? "on-yes" : ""}">Yes</button>
-              <button type="button" data-status="maybe" class="${status === "maybe" ? "on-maybe" : ""}">Maybe</button>
-              <button type="button" data-status="no"    class="${status === "no" ? "on-no" : ""}">No</button>
+              ${STATUSES.map(st => `<button type="button" data-status="${st}"
+                class="${status === st ? "on-" + st : ""}">${STATUS_LABELS[st]}</button>`).join("")}
             </span>
           </div>${docPanel}`;
       }).join("")}
@@ -986,19 +1244,19 @@ async function renderProject(id) {
         <div class="category-head" data-cat-toggle="${cat.id}"
           title="Click to ${collapsed ? "expand" : "collapse"} this category">
           <h2>${esc(cat.name)}</h2>
-          <span class="cat-pts">${collapsed && (c.yes || c.maybe) ? `Yes ${c.yes} · Maybe ${c.maybe} · ` : ""}${cat.total} possible pts<span class="chev">${collapsed ? "▸" : "▾"}</span></span>
+          <span class="cat-pts">${collapsed ? `${c.nYes} Yes · ${c.nMaybeYes} Maybe Yes · ${c.nMaybeNo} Maybe No · ${c.nNo} No · ` : ""}${cat.total} possible pts<span class="chev">${collapsed ? "▸" : "▾"}</span></span>
         </div>
         ${collapsed ? "" : rows + `
         <div class="cat-subtotal">
           ${c.reqTotal ? `<span>Required: <b>${c.reqMet}/${c.reqTotal}</b></span>` : ""}
           <span>Yes: <b>${c.yes}</b> pts</span>
-          <span>Maybe: <b>${c.maybe}</b> pts</span>
+          <span>Maybe Yes: <b>${c.maybeYes}</b> pts</span>
         </div>`}
       </section>`;
   };
 
   const goalPct = goal ? Math.min(100, (score.yes / goal) * 100) : 0;
-  const maybePct = goal ? Math.min(100, ((score.yes + score.maybe) / goal) * 100) : 0;
+  const maybePct = goal ? Math.min(100, ((score.yes + score.maybeYes) / goal) * 100) : 0;
 
   view.innerHTML = `
     <div class="breadcrumbs">${staff ? `<a href="#/">Projects</a> / ` : ""}${esc(project.name)}</div>
@@ -1008,7 +1266,8 @@ async function renderProject(id) {
           <p class="kicker">${esc(protocol.name)} · ${esc(PROJECT_TYPE_NAMES[project.projectType])}</p>
           <h1>${esc(project.name)}</h1>
         </div>
-        <div style="display:flex; gap:8px;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <a class="btn btn-secondary" href="#/project/${id}/dashboard">Dashboard</a>
           ${staff ? `
           <a class="btn btn-primary" href="#/project/${id}/report">Export Report</a>
           <button class="btn btn-secondary" id="share-project">${sharingOpen.has(id) ? "Close Sharing" : "Share"}</button>
@@ -1034,7 +1293,7 @@ async function renderProject(id) {
       <div class="score-summary">
         <div class="card stat target"><div class="num">${goal ?? "—"}</div><div class="lbl">Points required</div></div>
         <div class="card stat yes"><div class="num">${score.yes}</div><div class="lbl">Points — Yes</div></div>
-        <div class="card stat maybe"><div class="num">${score.maybe}</div><div class="lbl">Points — Maybe</div></div>
+        <div class="card stat maybe"><div class="num">${score.maybeYes}</div><div class="lbl">Points — Maybe Yes</div></div>
         <div class="card stat req"><div class="num">${score.reqMet}/${score.reqTotal}</div><div class="lbl">Required credits met</div></div>
       </div>
       <div class="progress-wrap">
@@ -1045,7 +1304,7 @@ async function renderProject(id) {
         </div>
         <div class="progress-legend">
           <span><span class="dot" style="background:var(--status-yes)"></span>Yes points</span>
-          <span><span class="dot" style="background:var(--status-maybe)"></span>Maybe (potential)</span>
+          <span><span class="dot" style="background:var(--status-maybe)"></span>Maybe Yes (potential)</span>
           <span><span class="dot" style="background:var(--pbk-red)"></span>Goal: ${goal ?? "—"} pts (${esc(PROJECT_TYPE_NAMES[project.projectType])}, Class ${esc(project.districtClass)})</span>
         </div>
       </div>
@@ -1116,7 +1375,7 @@ async function renderProject(id) {
       const current = project.credits[creditId];
       const next = current && current.status === btn.dataset.status ? "none" : btn.dataset.status;
       const body = { status: next };
-      if (next === "yes" || next === "maybe") {
+      if (next === "yes" || next === "maybeYes") {
         // Fixed-point credits claim their value automatically; ranges start unset.
         let pts = null;
         eachCredit(protocol, c => { if (c.id === creditId) pts = c.pts; });
@@ -1131,7 +1390,7 @@ async function renderProject(id) {
     sel.addEventListener("change", async () => {
       if (sel.value === "") return;
       const creditId = sel.dataset.credit;
-      const current = project.credits[creditId] || { status: "maybe" };
+      const current = project.credits[creditId] || { status: "maybeYes" };
       await api("PUT", `/api/projects/${id}/credits/${creditId}`,
         { status: current.status, points: Number(sel.value) });
       renderProject(id);

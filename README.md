@@ -33,6 +33,17 @@ required prerequisites, and certification thresholds — per project.
 - **OSPI Credit Interpretation Library** — all rulings encoded in
   `config/interpretations.json`, browsable from the header nav and surfaced
   inline on the credits they affect in both editions.
+- **Four-state scoring** — credits are marked Yes / Maybe Yes / Maybe No /
+  No (matching PBK's integrated design workshop scorecards); Yes and Maybe
+  Yes carry claimed points. Collapsed categories show per-state credit
+  counts.
+- **Project dashboard** — a print-ready gauge dashboard per project
+  (visible to staff and invited collaborators): overall points gauge with
+  the certification minimum marked, an EUI gauge (baseline vs projected
+  with WSSP CBPS target, AIA 2030, and Net Zero markers — the WSSP target
+  comes from the 2023 handbook's E1.2 tables keyed by climate zone, school
+  level, and operating hours entered in project details), and a points
+  donut per category.
 - **OSPI export report** — the "Export Report" button on a project renders a
   print-optimized report mirroring the official scorecard layout (header
   fields, per-category credit tables with Yes/Maybe/No and claimed points,

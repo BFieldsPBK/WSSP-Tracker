@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 7;
+const API_VERSION = 8;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -77,11 +77,16 @@ function normalizeDPhase(v) {
 let projects = [];
 if (fs.existsSync(PROJECTS_FILE)) {
   projects = JSON.parse(fs.readFileSync(PROJECTS_FILE, "utf8"));
-  // One-time normalization of legacy free-text D-phase values ("D4" -> "d4").
+  // One-time normalizations: legacy free-text D-phases ("D4" -> "d4") and the
+  // old single "maybe" status, which split into maybeYes / maybeNo (existing
+  // entries read as leaning yes — they were counted as potential points).
   let migrated = false;
   for (const p of projects) {
     const norm = normalizeDPhase(p.dPhase);
     if (norm !== (p.dPhase || "")) { p.dPhase = norm; migrated = true; }
+    for (const entry of Object.values(p.credits || {})) {
+      if (entry.status === "maybe") { entry.status = "maybeYes"; migrated = true; }
+    }
   }
   if (migrated) setImmediate(() => saveProjects());
 }
@@ -445,9 +450,13 @@ const PROJECT_FIELDS = [
   "name", "number", "projectType", "protocolId",
   "district", "districtClass", "dPhase",
   "address", "city", "state", "zip",
-  "contactName", "contactPhone", "notes"
+  "contactName", "contactPhone", "notes",
+  "schoolLevel", "climateZone", "opHours", "baselineEUI", "projectedEUI"
 ];
 const PROJECT_TYPES = ["new", "newBuilding", "modernization"];
+const SCHOOL_LEVELS = ["", "es", "ms", "hs", "other"];
+const CLIMATE_ZONES = ["", "4C", "5B"];
+const OP_HOURS = ["", "50", "167"];
 
 function validateProject(body, { partial } = {}) {
   const errors = [];
@@ -459,6 +468,20 @@ function validateProject(body, { partial } = {}) {
     }
   }
   if (out.dPhase !== undefined) out.dPhase = normalizeDPhase(out.dPhase);
+  if (out.schoolLevel !== undefined && !SCHOOL_LEVELS.includes(out.schoolLevel)) {
+    errors.push("schoolLevel must be es, ms, hs, or other");
+  }
+  if (out.climateZone !== undefined && !CLIMATE_ZONES.includes(out.climateZone)) {
+    errors.push("climateZone must be 4C or 5B");
+  }
+  if (out.opHours !== undefined && !OP_HOURS.includes(out.opHours)) {
+    errors.push("opHours must be 50 or 167");
+  }
+  for (const f of ["baselineEUI", "projectedEUI"]) {
+    if (out[f] !== undefined && out[f] !== "" && !(Number(out[f]) >= 0)) {
+      errors.push(`${f} must be a non-negative number`);
+    }
+  }
   if (!partial || out.name !== undefined) {
     if (!out.name) errors.push("Project name is required");
   }
@@ -533,10 +556,11 @@ app.put("/api/projects/:id/credits/:creditId", (req, res) => {
   if (status === null || status === "none") {
     delete p.credits[req.params.creditId];
   } else {
-    if (!["yes", "maybe", "no"].includes(status)) {
-      return res.status(400).json({ errors: ["status must be yes, maybe, no, or none"] });
+    const normalized = status === "maybe" ? "maybeYes" : status;
+    if (!["yes", "maybeYes", "maybeNo", "no"].includes(normalized)) {
+      return res.status(400).json({ errors: ["status must be yes, maybeYes, maybeNo, no, or none"] });
     }
-    const entry = { status };
+    const entry = { status: normalized };
     if (points !== undefined && points !== null) {
       const n = Number(points);
       if (!Number.isInteger(n) || n < 0 || n > 99) {
