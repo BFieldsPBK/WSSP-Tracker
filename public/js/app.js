@@ -151,7 +151,9 @@ async function route() {
     if (hash === "#/" || hash === "#") return renderProjectList();
     if (hash === "#/new") return renderProjectForm();
     if (hash === "#/reference") return renderReference();
-    let m = hash.match(/^#\/project\/([a-z0-9]+)\/edit$/);
+    let m = hash.match(/^#\/project\/([a-z0-9]+)\/report$/);
+    if (m) return renderReport(m[1]);
+    m = hash.match(/^#\/project\/([a-z0-9]+)\/edit$/);
     if (m) return renderProjectForm(m[1]);
     m = hash.match(/^#\/project\/([a-z0-9]+)$/);
     if (m) return renderProject(m[1]);
@@ -355,6 +357,171 @@ async function renderReference() {
   `;
 }
 
+/* ── OSPI export report ──────────────────────────────────────── */
+async function renderReport(id) {
+  const [project, protocols] = await Promise.all([api("GET", `/api/projects/${id}`), loadProtocols()]);
+  const protocol = protocols[project.protocolId];
+  if (!protocol) throw new Error(`Unknown protocol: ${project.protocolId}`);
+
+  const goal = threshold(protocol, project);
+  const score = computeScore(protocol, project);
+  const compliant = score.reqMet === score.reqTotal && score.yes >= goal;
+  const addressLine = [project.address, project.city, project.state, project.zip].filter(Boolean).join(", ");
+  const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
+  const mark = (entry, pts) => {
+    if (!entry) return ["", "", ""];
+    const p = entryPoints(entry, pts);
+    const cell = pts.max > 0 ? (p || "✓") : "✓";
+    if (entry.status === "yes") return [cell, "", ""];
+    if (entry.status === "maybe") return ["", cell, ""];
+    if (entry.status === "no") return ["", "", "✓"];
+    return ["", "", ""];
+  };
+
+  const catTable = cat => {
+    const c = score.byCategory[cat.id] || { yes: 0, maybe: 0, reqTotal: 0, reqMet: 0 };
+    const rows = cat.groups.map(g =>
+      `<tr class="group-row"><td colspan="6">${esc(g.name)}</td></tr>` +
+      g.credits.map(([cid, cname, spec]) => {
+        const pts = parsePoints(spec);
+        if (pts.header) {
+          return `<tr class="parent-row"><td>${esc(cid)}</td><td colspan="5">${esc(cname)}</td></tr>`;
+        }
+        const [y, m, n] = mark(project.credits[cid], pts);
+        return `<tr>
+          <td>${esc(cid)}</td>
+          <td>${esc(cname)}</td>
+          <td class="num">${esc(pts.label)}</td>
+          <td class="num">${y}</td>
+          <td class="num">${m}</td>
+          <td class="num">${n}</td>
+        </tr>`;
+      }).join("")
+    ).join("");
+    return `
+      <table class="report-table">
+        <thead>
+          <tr class="cat-row"><th colspan="2">${esc(cat.name)}</th><th class="num">Possible<br>Points</th><th class="num">Yes</th><th class="num">Maybe</th><th class="num">No</th></tr>
+        </thead>
+        <tbody>
+          ${rows}
+          <tr class="subtotal-row">
+            <td colspan="2">Total possible: ${cat.total}</td>
+            <td class="num"></td>
+            <td class="num">${c.yes}</td>
+            <td class="num">${c.maybe}</td>
+            <td class="num"></td>
+          </tr>
+        </tbody>
+      </table>`;
+  };
+
+  const docRows = [];
+  for (const [cid, list] of Object.entries(project.documents || {})) {
+    for (const d of list) docRows.push({ cid, ...d });
+  }
+  docRows.sort((a, b) => a.cid.localeCompare(b.cid, undefined, { numeric: true }));
+  const noteRows = Object.entries(project.creditNotes || {})
+    .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }));
+
+  const thNew = protocol.thresholds.new, thMod = protocol.thresholds.modernization;
+  const isNewType = project.projectType !== "modernization";
+  const goalCell = (v, on) => `<td class="num ${on ? "goal-on" : ""}">${v}</td>`;
+
+  view.innerHTML = `
+    <div class="no-print" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;">
+      <div class="breadcrumbs" style="margin:0;"><a href="#/">Projects</a> / <a href="#/project/${id}">${esc(project.name)}</a> / Export</div>
+      <div style="display:flex; gap:10px;">
+        <a class="btn btn-secondary" href="#/project/${id}">Back to Scorecard</a>
+        <button class="btn btn-primary" onclick="window.print()">Print / Save as PDF</button>
+      </div>
+    </div>
+    <div class="no-print note-box" style="margin:0 0 18px;">
+      Use your browser's print dialog to save as PDF. Enable <b>"Background graphics"</b> so shading prints.
+    </div>
+
+    <div class="report card">
+      <header class="report-head">
+        <img src="/assets/logo.png" alt="PBK" class="report-logo">
+        <div>
+          <div class="report-title">${esc(protocol.name)} Scorecard</div>
+          <div class="report-sub">Washington Sustainable Schools Protocol · Prepared ${today}</div>
+        </div>
+        <div class="report-verdict ${compliant ? "ok" : "pending"}">
+          ${compliant ? "Meets WSSP requirements" : "In progress"}
+        </div>
+      </header>
+
+      <div class="report-fields">
+        <div><b>District</b>${esc(project.district || "—")}</div>
+        <div><b>Contact Name &amp; Phone</b>${esc([project.contactName, project.contactPhone].filter(Boolean).join(" · ") || "—")}</div>
+        <div><b>Project Name and Type</b>${esc(project.name)} — ${esc(PROJECT_TYPE_NAMES[project.projectType])}</div>
+        <div><b>D Phase</b>${esc(project.dPhase || "—")}</div>
+        <div><b>Project Number</b>${esc(project.number || "—")}</div>
+        <div><b>Address</b>${esc(addressLine || "—")}</div>
+      </div>
+
+      <div class="report-summary">
+        <div><span class="num-lg">${score.yes}</span>Points earned (Yes)</div>
+        <div><span class="num-lg">${score.maybe}</span>Points potential (Maybe)</div>
+        <div><span class="num-lg">${goal ?? "—"}</span>Minimum required</div>
+        <div><span class="num-lg">${score.reqMet}/${score.reqTotal}</span>Required credits met</div>
+      </div>
+
+      ${protocol.categories.map(catTable).join("")}
+
+      <table class="report-table">
+        <tbody>
+          <tr class="subtotal-row grand">
+            <td colspan="2">GRAND TOTAL — Possible points: ${protocol.grandTotal} (most points possible, not a total of all points listed)</td>
+            <td class="num"></td>
+            <td class="num">${score.yes}</td>
+            <td class="num">${score.maybe}</td>
+            <td class="num"></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="report-mins">
+        <div class="report-mins-title">Minimum required for Washington Sustainable School — two-tier system</div>
+        <table class="report-table mins">
+          <tr><td></td><td class="num">Class I</td><td class="num">Class II</td></tr>
+          <tr><td>New Facility and New Building on Existing Facility</td>
+            ${goalCell(thNew.I, isNewType && project.districtClass === "I")}
+            ${goalCell(thNew.II, isNewType && project.districtClass === "II")}</tr>
+          <tr><td>Modernization</td>
+            ${goalCell(thMod.I, !isNewType && project.districtClass === "I")}
+            ${goalCell(thMod.II, !isNewType && project.districtClass === "II")}</tr>
+        </table>
+        <div class="report-note">Shaded cell is this project's applicable minimum. WSSP is a self-certified,
+        CHPS-designed protocol: projects pass based on meeting the required prerequisite credits and the
+        minimum point level. Compliance documentation is maintained with district project records and
+        provided to OSPI through the SCAP D-Form process.</div>
+      </div>
+
+      <h2 class="report-section">Supporting Documentation Index</h2>
+      ${docRows.length ? `
+        <table class="report-table docs">
+          <thead><tr><th>Credit</th><th>Document</th><th>Uploaded</th><th class="num">Size</th></tr></thead>
+          <tbody>${docRows.map(d => `
+            <tr><td>${esc(d.cid)}</td><td>${esc(d.name)}</td>
+            <td>${new Date(d.uploadedAt).toLocaleDateString()}</td><td class="num">${formatBytes(d.size)}</td></tr>`).join("")}
+          </tbody>
+        </table>` : `<div class="report-note">No documents uploaded yet.</div>`}
+
+      ${noteRows.length ? `
+        <h2 class="report-section">Credit Notes</h2>
+        <table class="report-table docs">
+          <thead><tr><th>Credit</th><th>Note</th></tr></thead>
+          <tbody>${noteRows.map(([cid, t]) => `<tr><td>${esc(cid)}</td><td>${esc(t)}</td></tr>`).join("")}</tbody>
+        </table>` : ""}
+
+      <div class="report-footer">Generated by the PBK WSSP Tracker · ${today} · ${esc(protocol.name)}, published ${esc(protocol.published)}</div>
+    </div>
+  `;
+}
+
 /* ── Project page (overview + scorecard) ─────────────────────── */
 async function renderProject(id) {
   const [project, protocols] = await Promise.all([api("GET", `/api/projects/${id}`), loadProtocols(), loadReference()]);
@@ -469,6 +636,7 @@ async function renderProject(id) {
           <h1>${esc(project.name)}</h1>
         </div>
         <div style="display:flex; gap:8px;">
+          <a class="btn btn-primary" href="#/project/${id}/report">Export Report</a>
           <a class="btn btn-secondary" href="#/project/${id}/edit">Edit Details</a>
           <button class="btn btn-quiet" id="delete-project" title="Delete project">Delete</button>
         </div>

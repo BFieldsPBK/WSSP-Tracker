@@ -32,6 +32,13 @@ required prerequisites, and certification thresholds — per project.
 - **OSPI Credit Interpretation Library** — all rulings encoded in
   `config/interpretations.json`, browsable from the header nav and surfaced
   inline on the credits they affect in both editions.
+- **OSPI export report** — the "Export Report" button on a project renders a
+  print-optimized report mirroring the official scorecard layout (header
+  fields, per-category credit tables with Yes/Maybe/No and claimed points,
+  category totals, grand total, and the two-tier minimum table with the
+  project's applicable threshold highlighted), plus a supporting
+  documentation index and credit notes. "Print / Save as PDF" uses the
+  browser's print dialog (enable "Background graphics").
 
 The visual design follows the shared PBK design system (Barlow Semi
 Condensed + Source Sans 3, navy/red brand palette, white cards on a pale
@@ -43,7 +50,6 @@ are bundled in `public/vendor/fonts`, so the tool needs no internet access.
 - Client / consultant / contractor access with per-project roles
 - WSSP 2023 handbook requirement excerpts (2018 is done; the 2023 handbook
   PDF is needed as a source)
-- OSPI-ready compliance report export
 
 ## Running it
 

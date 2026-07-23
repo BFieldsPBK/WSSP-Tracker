@@ -677,6 +677,139 @@ legend {
   margin-top: 12px;
 }
 
+/* ── OSPI export report ────────────────────────────────────────── */
+.report { padding: 34px 40px; }
+.report-head {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  border-bottom: 3px solid var(--pbk-primary);
+  padding-bottom: 16px;
+  margin-bottom: 18px;
+}
+.report-logo { height: 44px; }
+.report-title {
+  font-family: var(--pbk-font-heading);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--pbk-ink);
+  line-height: 1.15;
+}
+.report-sub { font-size: 13px; color: var(--pbk-muted); }
+.report-verdict {
+  margin-left: auto;
+  font-family: var(--pbk-font-heading);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: .04em;
+  padding: 8px 16px;
+  border-radius: var(--pbk-radius-sm);
+  white-space: nowrap;
+}
+.report-verdict.ok { background: var(--status-yes-bg); color: var(--status-yes); }
+.report-verdict.pending { background: var(--status-maybe-bg); color: var(--status-maybe); }
+
+.report-fields {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 28px;
+  margin-bottom: 18px;
+  font-size: 13.5px;
+  color: var(--pbk-ink);
+}
+.report-fields b {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--pbk-muted);
+}
+.report-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 22px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--pbk-muted);
+}
+.report-summary > div {
+  border: 1px solid var(--pbk-border);
+  border-radius: var(--pbk-radius-sm);
+  padding: 10px 6px;
+  background: var(--pbk-bg-pale);
+}
+.report-summary .num-lg {
+  display: block;
+  font-family: var(--pbk-font-heading);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--pbk-ink);
+}
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+  font-size: 12.5px;
+}
+.report-table th, .report-table td {
+  border: 1px solid var(--pbk-border);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.report-table .num { text-align: center; width: 58px; white-space: nowrap; }
+.report-table thead th { background: var(--pbk-primary); color: #fff; font-weight: 600; }
+.report-table .cat-row th { font-family: var(--pbk-font-heading); font-size: 14px; letter-spacing: .03em; }
+.report-table .group-row td {
+  background: var(--pbk-bg-light);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--pbk-steel);
+}
+.report-table .parent-row td { background: var(--pbk-bg-pale); font-weight: 600; }
+.report-table .subtotal-row td { background: var(--pbk-bg-pale); font-weight: 700; color: var(--pbk-ink); }
+.report-table .subtotal-row.grand td { background: var(--pbk-primary-19); }
+.report-table.mins { width: auto; min-width: 420px; }
+.report-table.mins .goal-on { background: var(--status-yes-bg); font-weight: 700; }
+.report-table.docs td, .report-table.docs th { font-size: 12px; }
+
+.report-mins { margin: 8px 0 20px; }
+.report-mins-title { font-weight: 700; color: var(--pbk-ink); font-size: 13px; margin-bottom: 8px; }
+.report-note { font-size: 12px; color: var(--pbk-muted); margin-top: 8px; max-width: 720px; }
+.report-section {
+  font-family: var(--pbk-font-heading);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--pbk-primary);
+  margin: 24px 0 10px;
+}
+.report-footer {
+  border-top: 1px solid var(--pbk-border);
+  margin-top: 22px;
+  padding-top: 10px;
+  font-size: 11.5px;
+  color: var(--pbk-faint);
+}
+
+@media print {
+  #app-bar, #app-footer, #version-banner, .no-print { display: none !important; }
+  html, body { background: #fff; }
+  #view { max-width: none; padding: 0; }
+  .report { border: none; box-shadow: none; border-radius: 0; padding: 0; }
+  .report-table { page-break-inside: auto; }
+  .report-table tr { page-break-inside: avoid; }
+  .report-section { page-break-after: avoid; }
+  .report-table thead { display: table-header-group; }
+}
+@page { margin: 14mm 12mm; }
+
 @media (max-width: 640px) {
   .credit-row, .credit-header-row { flex-wrap: wrap; }
   .credit-id { flex-basis: 60px; }
