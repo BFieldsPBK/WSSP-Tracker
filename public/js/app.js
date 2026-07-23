@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 2;
+const API_VERSION = 3;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {
@@ -38,6 +38,30 @@ async function loadProtocols() {
     for (const p of list) PROTOCOLS[p.id] = p;
   }
   return PROTOCOLS;
+}
+
+let REFERENCE = null; // { excerpts: {protocolId: {creditId: text}}, interpretations: [...] }
+async function loadReference() {
+  if (!REFERENCE) REFERENCE = await api("GET", "/api/reference");
+  return REFERENCE;
+}
+
+/* Requirement excerpt for a credit, falling back to its parent credit
+ * (sub-credits like E1.0.1 are documented under E1.0's section). */
+function excerptFor(protocolId, creditId) {
+  const ex = (REFERENCE?.excerpts || {})[protocolId] || {};
+  if (ex[creditId]) return ex[creditId];
+  const parent = creditId.replace(/\.\d+$/, "");
+  return parent !== creditId ? ex[parent] : undefined;
+}
+
+/* OSPI interpretations attached to a credit (or its parent) for an edition. */
+function interpretationsFor(protocolId, creditId) {
+  const parent = creditId.replace(/\.\d+$/, "");
+  return (REFERENCE?.interpretations || []).filter(i => {
+    const refs = (i.creditRefs || {})[protocolId] || [];
+    return refs.includes(creditId) || (parent !== creditId && refs.includes(parent));
+  });
 }
 
 /* Point spec strings: "R", "1", "1-2", "R-1", "2-7", "35", "1, 2-3", "1 + 2-3".
@@ -126,6 +150,7 @@ async function route() {
   try {
     if (hash === "#/" || hash === "#") return renderProjectList();
     if (hash === "#/new") return renderProjectForm();
+    if (hash === "#/reference") return renderReference();
     let m = hash.match(/^#\/project\/([a-z0-9]+)\/edit$/);
     if (m) return renderProjectForm(m[1]);
     m = hash.match(/^#\/project\/([a-z0-9]+)$/);
@@ -292,9 +317,47 @@ async function renderProjectForm(id) {
   });
 }
 
+/* ── OSPI interpretation library page ────────────────────────── */
+function interpCard(i, protocols) {
+  const refs = Object.entries(i.creditRefs || {})
+    .map(([pid, ids]) => `${protocols[pid]?.name || pid}: ${ids.join(", ")}`).join(" · ");
+  return `
+    <details class="card interp-card">
+      <summary>
+        <span class="interp-subject">${esc(i.subject)}</span>
+        <span class="interp-meta">${esc(i.issuedUnder)} · ${new Date(i.date + "T12:00:00").toLocaleDateString()}${refs ? " · " + esc(refs) : ""}</span>
+      </summary>
+      <div class="interp-body">
+        <p><b>Background.</b> ${esc(i.background)}</p>
+        <p><b>Request.</b> ${esc(i.request)}</p>
+        <p><b>Interpretation.</b> ${esc(i.interpretation)}</p>
+      </div>
+    </details>`;
+}
+
+async function renderReference() {
+  const [protocols, ref] = await Promise.all([loadProtocols(), loadReference()]);
+  const general = ref.interpretations.filter(i => i.general);
+  const specific = ref.interpretations.filter(i => !i.general);
+  view.innerHTML = `
+    <div class="page-head">
+      <div>
+        <p class="kicker">Reference</p>
+        <h1>OSPI Credit Interpretation Library</h1>
+        <p class="lede">Official OSPI rulings on WSSP credits. Credit-specific interpretations also appear
+        inline on each project's scorecard.</p>
+      </div>
+    </div>
+    <h2 class="section-title">Program-Level Interpretations</h2>
+    ${general.map(i => interpCard(i, protocols)).join("")}
+    <h2 class="section-title">Credit-Specific Interpretations</h2>
+    ${specific.map(i => interpCard(i, protocols)).join("")}
+  `;
+}
+
 /* ── Project page (overview + scorecard) ─────────────────────── */
 async function renderProject(id) {
-  const [project, protocols] = await Promise.all([api("GET", `/api/projects/${id}`), loadProtocols()]);
+  const [project, protocols] = await Promise.all([api("GET", `/api/projects/${id}`), loadProtocols(), loadReference()]);
   const protocol = protocols[project.protocolId];
   if (!protocol) throw new Error(`Unknown protocol: ${project.protocolId}`);
 
@@ -322,9 +385,33 @@ async function renderProject(id) {
             ${entry?.points === undefined ? `<option value="" selected>pts?</option>` : ""}
           </select>` : "";
         const docs = (project.documents || {})[cid] || [];
+        const note = (project.creditNotes || {})[cid] || "";
+        const interps = interpretationsFor(project.protocolId, cid);
+        const excerpt = excerptFor(project.protocolId, cid);
         const panelOpen = openDocPanels.has(cid);
         const docPanel = panelOpen ? `
           <div class="doc-panel" data-doc-panel="${cid}">
+            ${excerpt ? `
+              <details class="excerpt-box">
+                <summary>Requirement — ${esc(protocol.name)} handbook excerpt</summary>
+                <div class="excerpt-text">${esc(excerpt).replace(/\n\n/g, "<br><br>")}</div>
+                <div class="doc-meta">Auto-extracted for reference — always confirm against the official OSPI handbook.</div>
+              </details>` : ""}
+            ${interps.map(i => `
+              <details class="interp-inline">
+                <summary>OSPI interpretation: ${esc(i.subject)} <span class="doc-meta">(${esc(i.issuedUnder)}, ${new Date(i.date + "T12:00:00").toLocaleDateString()})</span></summary>
+                <div class="interp-body">
+                  <p><b>Background.</b> ${esc(i.background)}</p>
+                  <p><b>Request.</b> ${esc(i.request)}</p>
+                  <p><b>Interpretation.</b> ${esc(i.interpretation)}</p>
+                </div>
+              </details>`).join("")}
+            <div class="note-field">
+              <label for="note-${cid}">Project notes for ${esc(cid)}</label>
+              <textarea id="note-${cid}" class="credit-note" data-credit="${cid}"
+                placeholder="Approach, responsible party, open questions…">${esc(note)}</textarea>
+              <span class="doc-meta note-status" data-note-status="${cid}"></span>
+            </div>
             ${docs.length ? docs.map(d => `
               <div class="doc-item">
                 <a href="/api/projects/${project.id}/files/${d.id}" download>${esc(d.name)}</a>
@@ -340,7 +427,7 @@ async function renderProject(id) {
         return `
           <div class="credit-row ${panelOpen ? "docs-open" : ""}" data-credit-row="${cid}">
             <span class="credit-id">${esc(cid)}</span>
-            <span class="credit-name">${esc(cname)}${pts.required ? '<span class="credit-req">REQ</span>' : ""}</span>
+            <span class="credit-name">${esc(cname)}${pts.required ? '<span class="credit-req">REQ</span>' : ""}${interps.length ? '<span class="cil-badge" title="OSPI interpretation available — open the credit panel">CIL</span>' : ""}</span>
             ${pointsSel}
             <button type="button" class="doc-btn ${docs.length ? "has-docs" : ""} ${panelOpen ? "open" : ""}"
               data-docs-toggle="${cid}" title="Supporting documentation">
@@ -477,6 +564,17 @@ async function renderProject(id) {
         alert(msg);
       }
       renderProject(id);
+    });
+  });
+  view.querySelectorAll(".credit-note").forEach(ta => {
+    ta.addEventListener("blur", async () => {
+      const cid = ta.dataset.credit;
+      const prev = (project.creditNotes || {})[cid] || "";
+      if (ta.value.trim() === prev) return;
+      const statusEl = view.querySelector(`[data-note-status="${cid}"]`);
+      const saved = await api("PUT", `/api/projects/${id}/credits/${cid}/note`, { text: ta.value });
+      project.creditNotes = saved.creditNotes || {};
+      if (statusEl) statusEl.textContent = "Saved";
     });
   });
   view.querySelectorAll(".doc-remove").forEach(btn => {

@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 2;
+const API_VERSION = 3;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -42,12 +42,26 @@ function writeFileAtomic(file, data) {
   fs.renameSync(tmp, file);
 }
 
-/* ── Protocols (read-only config) ────────────────────────────── */
+/* ── Protocols & reference material (read-only config) ───────── */
 const protocols = {};
 for (const f of fs.readdirSync(PROTOCOL_DIR).filter(f => f.endsWith(".json"))) {
   const p = JSON.parse(fs.readFileSync(path.join(PROTOCOL_DIR, f), "utf8"));
   protocols[p.id] = p;
 }
+
+/* Handbook excerpts, keyed by protocol id -> credit id -> text. */
+const excerpts = {};
+const HANDBOOK_DIR = path.join(__dirname, "config", "handbook");
+if (fs.existsSync(HANDBOOK_DIR)) {
+  for (const f of fs.readdirSync(HANDBOOK_DIR).filter(f => f.endsWith("-excerpts.json"))) {
+    const protocolId = f.replace("-excerpts.json", "");
+    excerpts[protocolId] = JSON.parse(fs.readFileSync(path.join(HANDBOOK_DIR, f), "utf8"));
+  }
+}
+
+/* OSPI credit interpretation library. */
+const interpretations = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "config", "interpretations.json"), "utf8"));
 
 /* ── Store ───────────────────────────────────────────────────── */
 let projects = [];
@@ -69,6 +83,10 @@ app.get("/api/meta", (req, res) => {
 
 app.get("/api/protocols", (req, res) => {
   res.json(Object.values(protocols).sort((a, b) => b.id.localeCompare(a.id)));
+});
+
+app.get("/api/reference", (req, res) => {
+  res.json({ excerpts, interpretations });
 });
 
 app.get("/api/projects", (req, res) => {
@@ -182,6 +200,20 @@ app.put("/api/projects/:id/credits/:creditId", (req, res) => {
     }
     p.credits[req.params.creditId] = entry;
   }
+  p.updatedAt = new Date().toISOString();
+  saveProjects();
+  res.json(p);
+});
+
+/* Per-credit notes, stored apart from status entries so clearing a
+ * credit's Yes/Maybe/No never discards its notes. */
+app.put("/api/projects/:id/credits/:creditId/note", (req, res) => {
+  const p = findProject(req, res);
+  if (!p) return;
+  const text = req.body && typeof req.body.text === "string" ? req.body.text.trim() : "";
+  if (!p.creditNotes) p.creditNotes = {};
+  if (text) p.creditNotes[req.params.creditId] = text;
+  else delete p.creditNotes[req.params.creditId];
   p.updatedAt = new Date().toISOString();
   saveProjects();
   res.json(p);

@@ -24,6 +24,14 @@ required prerequisites, and certification thresholds — per project.
   each credit via the paperclip button, with download and remove. Files are
   stored in the `data/files` folder and are kept even if a credit's
   Yes/Maybe/No status is cleared.
+- **Credit detail panels** — each credit's panel also shows the requirement
+  text auto-extracted from the WSSP 2018 handbook
+  (`config/handbook/wssp-2018-excerpts.json`), any OSPI credit
+  interpretations that apply (a "CIL" badge marks affected credits), and a
+  free-text project note per credit.
+- **OSPI Credit Interpretation Library** — all rulings encoded in
+  `config/interpretations.json`, browsable from the header nav and surfaced
+  inline on the credits they affect in both editions.
 
 The visual design follows the shared PBK design system (Barlow Semi
 Condensed + Source Sans 3, navy/red brand palette, white cards on a pale
@@ -33,8 +41,8 @@ are bundled in `public/vendor/fonts`, so the tool needs no internet access.
 ## Planned
 
 - Client / consultant / contractor access with per-project roles
-- Credit detail pages with handbook requirement text
-- OSPI credit interpretation library surfaced on credit pages
+- WSSP 2023 handbook requirement excerpts (2018 is done; the 2023 handbook
+  PDF is needed as a source)
 - OSPI-ready compliance report export
 
 ## Running it
