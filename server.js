@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 8;
+const API_VERSION = 9;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -451,7 +451,8 @@ const PROJECT_FIELDS = [
   "district", "districtClass", "dPhase",
   "address", "city", "state", "zip",
   "contactName", "contactPhone", "notes",
-  "schoolLevel", "climateZone", "opHours", "baselineEUI", "projectedEUI"
+  "schoolLevel", "climateZone", "opHours", "baselineEUI", "projectedEUI",
+  "aiaReductionPct"
 ];
 const PROJECT_TYPES = ["new", "newBuilding", "modernization"];
 const SCHOOL_LEVELS = ["", "es", "ms", "hs", "other"];
@@ -481,6 +482,10 @@ function validateProject(body, { partial } = {}) {
     if (out[f] !== undefined && out[f] !== "" && !(Number(out[f]) >= 0)) {
       errors.push(`${f} must be a non-negative number`);
     }
+  }
+  if (out.aiaReductionPct !== undefined && out.aiaReductionPct !== "" &&
+      !(Number(out.aiaReductionPct) >= 0 && Number(out.aiaReductionPct) <= 100)) {
+    errors.push("aiaReductionPct must be between 0 and 100");
   }
   if (!partial || out.name !== undefined) {
     if (!out.name) errors.push("Project name is required");

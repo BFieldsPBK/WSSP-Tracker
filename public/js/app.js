@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 8;
+const API_VERSION = 9;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {
@@ -717,7 +717,8 @@ async function renderProjectForm(id) {
             </select>
             <span class="hint">Per the CBPS tables in WSSP 2023 credit E1.2.</span>
           </div>
-          <div class="form-field"></div>
+          ${field("aiaReductionPct", "AIA 2030 target (% reduction)", { placeholder: "80",
+            hint: "Percent reduction from baseline EUI for the dashboard's AIA 2030 marker — editable as the 2030 Challenge targets change. Defaults to 80." })}
         </div>
         <div class="form-row">
           ${field("baselineEUI", "Baseline EUI (kBtu/sf/yr)", { placeholder: "e.g. 46", hint: "Modeled baseline, e.g. from the ELCCA." })}
@@ -909,10 +910,12 @@ async function renderDashboard(id) {
   const projected = Number(project.projectedEUI) || null;
   const wsspTarget = wsspEuiTarget(project);
   const euiReady = baseline && projected;
+  const aiaPct = project.aiaReductionPct !== "" && project.aiaReductionPct != null
+    ? Number(project.aiaReductionPct) : 80;
   const euiTicks = [];
   if (baseline) euiTicks.push({ key: "base", value: baseline, label: `Baseline ${baseline}` });
   if (wsspTarget) euiTicks.push({ key: "wssp", value: wsspTarget, label: `WSSP ${wsspTarget}` });
-  if (baseline) euiTicks.push({ key: "aia", value: +(baseline * 0.2).toFixed(1), label: "AIA 2030" });
+  if (baseline) euiTicks.push({ key: "aia", value: +(baseline * (1 - aiaPct / 100)).toFixed(1), label: "AIA 2030" });
   euiTicks.push({ key: "nz", value: 0, label: "Net Zero" });
 
   view.innerHTML = `
@@ -954,7 +957,7 @@ async function renderDashboard(id) {
             : `<div class="dash-eui-empty">EUI gauge needs <b>Baseline EUI</b> and <b>Projected EUI</b>${staff ? " — add them under Edit Details" : ""}.</div>`}
           <div class="dash-gauge-caption">
             <b>EUI</b> (kBtu/sf/yr)${baseline ? ` — baseline ${baseline}` : ""}${projected ? ` · projected ${projected}` : ""}${wsspTarget ? ` · WSSP target ${wsspTarget}` : ""}
-            ${wsspTarget ? `<span class="dash-note">WSSP target: CBPS adjusted NC/alteration EUIt for ${esc(project.climateZone)} ${esc(SCHOOL_LEVEL_NAMES[project.schoolLevel] || "")} (WSSP 2023, E1.2). AIA 2030 marker = 80% reduction from baseline.</span>`
+            ${wsspTarget ? `<span class="dash-note">WSSP target: CBPS adjusted NC/alteration EUIt for ${esc(project.climateZone)} ${esc(SCHOOL_LEVEL_NAMES[project.schoolLevel] || "")} (WSSP 2023, E1.2). AIA 2030 marker = ${aiaPct}% reduction from baseline (editable in project details).</span>`
               : `<span class="dash-note">Set school level and climate zone in project details to place the WSSP target marker.</span>`}
           </div>
         </div>
@@ -1244,7 +1247,10 @@ async function renderProject(id) {
         <div class="category-head" data-cat-toggle="${cat.id}"
           title="Click to ${collapsed ? "expand" : "collapse"} this category">
           <h2>${esc(cat.name)}</h2>
-          <span class="cat-pts">${collapsed ? `${c.nYes} Yes · ${c.nMaybeYes} Maybe Yes · ${c.nMaybeNo} Maybe No · ${c.nNo} No · ` : ""}${cat.total} possible pts<span class="chev">${collapsed ? "▸" : "▾"}</span></span>
+          <span class="cat-pts-wrap">
+            <span class="cat-pts">${cat.total} possible pts<span class="chev">${collapsed ? "▸" : "▾"}</span></span>
+            <span class="cat-counts">${c.nYes} Yes · ${c.nMaybeYes} Maybe Yes · ${c.nMaybeNo} Maybe No · ${c.nNo} No</span>
+          </span>
         </div>
         ${collapsed ? "" : rows + `
         <div class="cat-subtotal">
