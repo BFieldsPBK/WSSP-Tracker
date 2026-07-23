@@ -182,6 +182,9 @@ const CLIP_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" st
 
 /* Credits whose document panel is open, so panels survive re-renders. */
 const openDocPanels = new Set();
+/* Group purposes open and categories collapsed, keyed to survive re-renders. */
+const openPurposes = new Set();
+const collapsedCats = new Set();
 
 /* ── Routes ──────────────────────────────────────────────────── */
 async function route() {
@@ -577,8 +580,16 @@ async function renderProject(id) {
 
   const catSection = cat => {
     const c = score.byCategory[cat.id] || { yes: 0, maybe: 0, reqTotal: 0, reqMet: 0 };
-    const rows = cat.groups.map(g => `
-      <div class="group-name">${esc(g.name)}</div>
+    const collapsed = collapsedCats.has(cat.id);
+    const rows = cat.groups.map(g => {
+      const gkey = `${cat.id}|${g.name}`;
+      const purposeOpen = openPurposes.has(gkey);
+      return `
+      <div class="group-name ${g.purpose ? "has-purpose" : ""}" ${g.purpose ? `data-purpose-toggle="${esc(gkey)}"` : ""}
+        ${g.purpose ? `title="Click to ${purposeOpen ? "hide" : "show"} this section's purpose"` : ""}>
+        ${esc(g.name)}${g.purpose ? `<span class="purpose-chev">${purposeOpen ? "▾" : "▸"} purpose</span>` : ""}
+      </div>
+      ${g.purpose && purposeOpen ? `<div class="group-purpose"><b>Purpose.</b> ${esc(g.purpose)}</div>` : ""}
       ${g.credits.map(([cid, cname, spec]) => {
         const pts = parsePoints(spec);
         if (pts.header) {
@@ -651,19 +662,21 @@ async function renderProject(id) {
             </span>
           </div>${docPanel}`;
       }).join("")}
-    `).join("");
+    `;
+    }).join("");
     return `
       <section class="card category cat-${cat.id}">
-        <div class="category-head">
+        <div class="category-head" data-cat-toggle="${cat.id}"
+          title="Click to ${collapsed ? "expand" : "collapse"} this category">
           <h2>${esc(cat.name)}</h2>
-          <span class="cat-pts">${cat.total} possible pts</span>
+          <span class="cat-pts">${collapsed && (c.yes || c.maybe) ? `Yes ${c.yes} · Maybe ${c.maybe} · ` : ""}${cat.total} possible pts<span class="chev">${collapsed ? "▸" : "▾"}</span></span>
         </div>
-        ${rows}
+        ${collapsed ? "" : rows + `
         <div class="cat-subtotal">
           ${c.reqTotal ? `<span>Required: <b>${c.reqMet}/${c.reqTotal}</b></span>` : ""}
           <span>Yes: <b>${c.yes}</b> pts</span>
           <span>Maybe: <b>${c.maybe}</b> pts</span>
-        </div>
+        </div>`}
       </section>`;
   };
 
@@ -769,6 +782,23 @@ async function renderProject(id) {
     row.addEventListener("click", ev => {
       if (ev.target.closest("button, select, a, input, label")) return;
       togglePanel(row.dataset.creditRow);
+    });
+  });
+  /* category roll-up and group purpose dropdowns */
+  view.querySelectorAll("[data-cat-toggle]").forEach(head => {
+    head.addEventListener("click", () => {
+      const catId = head.dataset.catToggle;
+      if (collapsedCats.has(catId)) collapsedCats.delete(catId);
+      else collapsedCats.add(catId);
+      renderProject(id);
+    });
+  });
+  view.querySelectorAll("[data-purpose-toggle]").forEach(el => {
+    el.addEventListener("click", () => {
+      const key = el.dataset.purposeToggle;
+      if (openPurposes.has(key)) openPurposes.delete(key);
+      else openPurposes.add(key);
+      renderProject(id);
     });
   });
   view.querySelectorAll(".doc-upload").forEach(input => {

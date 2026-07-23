@@ -441,6 +441,26 @@ legend {
   color: var(--pbk-muted);
   padding: 14px 20px 6px;
 }
+.group-name.has-purpose { cursor: pointer; user-select: none; }
+.group-name.has-purpose:hover { color: var(--pbk-steel); }
+.purpose-chev {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  color: var(--pbk-faint);
+  margin-left: 8px;
+}
+.group-name.has-purpose:hover .purpose-chev { color: var(--pbk-steel); }
+.group-purpose {
+  margin: 2px 20px 8px;
+  padding: 10px 14px;
+  background: var(--pbk-bg-light);
+  border-left: 3px solid var(--pbk-steel);
+  border-radius: 0 var(--pbk-radius-sm) var(--pbk-radius-sm) 0;
+  font-size: 13.5px;
+  color: var(--pbk-body);
+}
+.group-purpose b { color: var(--pbk-ink); }
 
 .credit-row, .credit-header-row {
   display: flex;

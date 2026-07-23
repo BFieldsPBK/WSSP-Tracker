@@ -1,209 +1,800 @@
 {
-  "id": "wssp-2023",
-  "name": "WSSP 2023",
-  "published": "April 2023",
-  "note": "Applies to SCAP projects with D4 approval issued on or after the 2023 edition's effective date. Projects may always choose a newer edition than required, never an older one (OSPI credit interpretation, 3/20/2017).",
-  "grandTotal": 238,
-  "thresholds": {
-    "new":           { "I": 66, "II": 58 },
-    "newBuilding":   { "I": 66, "II": 58 },
-    "modernization": { "I": 49, "II": 43 }
+ "id": "wssp-2023",
+ "name": "WSSP 2023",
+ "published": "April 2023",
+ "note": "Applies to SCAP projects with D4 approval issued on or after the 2023 edition's effective date. Projects may always choose a newer edition than required, never an older one (OSPI credit interpretation, 3/20/2017).",
+ "grandTotal": 238,
+ "thresholds": {
+  "new": {
+   "I": 66,
+   "II": 58
   },
-  "categories": [
+  "newBuilding": {
+   "I": 66,
+   "II": 58
+  },
+  "modernization": {
+   "I": 49,
+   "II": 43
+  }
+ },
+ "categories": [
+  {
+   "id": "site",
+   "name": "Site",
+   "total": 26,
+   "groups": [
     {
-      "id": "site", "name": "Site", "total": 26,
-      "groups": [
-        { "name": "1) Selection & Use", "credits": [
-          ["S1.0", "Code Compliance", "R"],
-          ["S1.1", "Sensitive Areas", "1"],
-          ["S1.2", "Greenfields", "1"],
-          ["S1.3", "Central Location", "1"],
-          ["S1.4", "Joint Use of On-Site Facilities", "1-2"],
-          ["S1.5", "Joint Use of Off-Site Facilities", "1"],
-          ["S1.6", "Protect Open Space", "2"],
-          ["S1.7", "Tree Canopy", "1"],
-          ["S1.8", "School Carbon Sequestration Data", "1"]
-        ]},
-        { "name": "2) Transportation", "credits": [
-          ["S2.1", "Public Transportation", "1"],
-          ["S2.2", "Bike and Walk to School", "1"],
-          ["S2.3", "Electric Buses or District Vehicles", "1-2"],
-          ["S2.4", "Minimize Parking", "1"]
-        ]},
-        { "name": "3) Stormwater Management", "credits": [
-          ["S3.0", "Construction Stormwater Pollution Prevention", "R"],
-          ["S3.1", "On-Site Stormwater Management and Flow Control", "R-1"],
-          ["S3.2", "Stormwater Treatment", "R-1"],
-          ["S3.3", "Soil Management", "1"]
-        ]},
-        { "name": "4) Outdoor Surfaces", "credits": [
-          ["S4.1", "Outdoor Learning Spaces", "2"],
-          ["S4.2", "School Gardens", "1-2"],
-          ["S4.3", "Reduce Heat Island – Site", "1-2"],
-          ["S4.4", "Reduce Heat Island – Roof Design", "1"]
-        ]},
-        { "name": "5) Outdoor Lighting", "credits": [
-          ["S5.1", "Light Pollution Reduction", "1"]
-        ]}
+     "name": "1) Selection & Use",
+     "credits": [
+      [
+       "S1.0",
+       "Code Compliance",
+       "R"
+      ],
+      [
+       "S1.1",
+       "Sensitive Areas",
+       "1"
+      ],
+      [
+       "S1.2",
+       "Greenfields",
+       "1"
+      ],
+      [
+       "S1.3",
+       "Central Location",
+       "1"
+      ],
+      [
+       "S1.4",
+       "Joint Use of On-Site Facilities",
+       "1-2"
+      ],
+      [
+       "S1.5",
+       "Joint Use of Off-Site Facilities",
+       "1"
+      ],
+      [
+       "S1.6",
+       "Protect Open Space",
+       "2"
+      ],
+      [
+       "S1.7",
+       "Tree Canopy",
+       "1"
+      ],
+      [
+       "S1.8",
+       "School Carbon Sequestration Data",
+       "1"
       ]
+     ],
+     "purpose": "Choose sites that protect students and staff from outdoor pollution and minimally impact the environment. Channel development to centrally located areas with existing infrastructure to protect greenfields, minimize transportation requirements, and preserve habitat and natural resources."
     },
     {
-      "id": "water", "name": "Water", "total": 6,
-      "groups": [
-        { "name": "1) Outdoor Systems", "credits": [
-          ["W1.0", "Landscape Water Use Budget", "R"],
-          ["W1.1", "Irrigation Water Reduction (50%, 100%)", "1-2"],
-          ["W1.2", "Control Irrigation Water Use", "R-1"],
-          ["W1.3", "Irrigation System Testing and Training", "1-2"],
-          ["W1.4", "Flow Switches and Irrigation Water Meters", "R-1"]
-        ]},
-        { "name": "2) Indoor Systems", "credits": [
-          ["W2.0", "Lead-Free Potable Water System", "R"]
-        ]}
+     "name": "2) Transportation",
+     "credits": [
+      [
+       "S2.1",
+       "Public Transportation",
+       "1"
+      ],
+      [
+       "S2.2",
+       "Bike and Walk to School",
+       "1"
+      ],
+      [
+       "S2.3",
+       "Electric Buses or District Vehicles",
+       "1-2"
+      ],
+      [
+       "S2.4",
+       "Minimize Parking",
+       "1"
       ]
+     ],
+     "purpose": "Reduce dependence on fossil fuels and reduce pollution and land development impacts from automobile use."
     },
     {
-      "id": "materials", "name": "Materials and Waste", "total": 29,
-      "groups": [
-        { "name": "1) Waste Reduction and Efficient Materials Use", "credits": [
-          ["MW1.0", "Storage and Collection of Recyclables and Compostables", "R-2"],
-          ["MW1.1", "Construction Site Waste Management (50%, 75%, 90%)", "R-3"],
-          ["MW1.2", "Building Reuse – Structure/Shell (50%, 75%, 95%)", "1-3"],
-          ["MW1.3", "Building Reuse – Interior Non-Structural Elements (50%)", "1"],
-          ["MW1.4", "Materials Reuse (5%, 10%)", "1-2"],
-          ["MW1.5", "PCB/T12 Lighting Removal", "R-1"]
-        ]},
-        { "name": "2) Sustainable Materials", "credits": [
-          ["MW2.1", "Recycled Content", "1-2"],
-          ["MW2.2", "Rapidly Renewable Materials", "1"],
-          ["MW2.3", "Certified Wood (50%, Chain of Custody)", "1-2"],
-          ["MW2.4", "Regional/Local Materials", "1-2"],
-          ["MW2.5", "Environmentally Preferable Products – Multiple Attribute", "1-2"],
-          ["MW2.6", "Environmental Product Declaration", "2-7"],
-          ["MW2.7", "Building Materials Health Product Disclosure", "1"]
-        ]}
+     "name": "3) Stormwater Management",
+     "credits": [
+      [
+       "S3.0",
+       "Construction Stormwater Pollution Prevention",
+       "R"
+      ],
+      [
+       "S3.1",
+       "On-Site Stormwater Management and Flow Control",
+       "R-1"
+      ],
+      [
+       "S3.2",
+       "Stormwater Treatment",
+       "R-1"
+      ],
+      [
+       "S3.3",
+       "Soil Management",
+       "1"
       ]
+     ],
+     "purpose": "Manage stormwater during and after construction to control erosion and runoff, reducing the negative impacts on water and air quality."
     },
     {
-      "id": "energy", "name": "Energy", "total": 108,
-      "groups": [
-        { "name": "1) Efficiency", "credits": [
-          ["E1.0", "Minimum Energy Performance", null],
-          ["E1.0.1", "Energy Code Minimum", "R"],
-          ["E1.0.2", "Energy Star Certified Equipment", "R"],
-          ["E1.1", "Superior Energy Performance – Prescriptive Component Design", "1-14"],
-          ["E1.2", "Superior Energy Performance – Whole Building Design", "1-20"],
-          ["E1.3", "Zero Net Energy", "35"]
-        ]},
-        { "name": "3) Alternative Energy", "credits": [
-          ["E3.1", "On-Site Renewable Energy", null],
-          ["E3.1.1", "On-Site Renewable Energy", "2-12"],
-          ["E3.1.2", "Solar Ready", "3"],
-          ["E3.1.3", "Service Water Heating", "2-8"]
-        ]},
-        { "name": "4) Commissioning", "credits": [
-          ["E4.0", "Fundamental Commissioning", "R"],
-          ["E4.1", "Enhanced Commissioning", "3"],
-          ["E4.1.1", "Energy Measurement and Verification", "1"]
-        ]},
-        { "name": "5) Metering & Management", "credits": [
-          ["E5.0", "Minimum Energy Metering", "R"],
-          ["E5.1", "Energy Metering – Other", null],
-          ["E5.1.1", "Energy Metering System – Not Code Required", "4"],
-          ["E5.1.2", "Energy Use Metering Display", "4"],
-          ["E5.2", "Energy Storage", "2"],
-          ["E6.0", "Building Enclosure Commissioning", "2"]
-        ]}
+     "name": "4) Outdoor Surfaces",
+     "credits": [
+      [
+       "S4.1",
+       "Outdoor Learning Spaces",
+       "2"
+      ],
+      [
+       "S4.2",
+       "School Gardens",
+       "1-2"
+      ],
+      [
+       "S4.3",
+       "Reduce Heat Island – Site",
+       "1-2"
+      ],
+      [
+       "S4.4",
+       "Reduce Heat Island – Roof Design",
+       "1"
       ]
+     ],
+     "purpose": "Reduce heat islands to minimize impact on microclimate and human and wildlife habitat while creating outdoor spaces for learning and teaching."
     },
     {
-      "id": "ieq", "name": "Indoor Environmental Quality", "total": 24,
-      "groups": [
-        { "name": "1) Daylighting", "credits": [
-          ["IEQ1.0", "Permanent Shading", "R-1"],
-          ["IEQ1.1", "Outdoor View Windows", "R-1"],
-          ["IEQ1.2", "Daylighting Classrooms", "1-4"]
-        ]},
-        { "name": "2) Electric Lighting Quality", "credits": [
-          ["IEQ2.0", "Electric Lighting Quality", null],
-          ["IEQ2.0.1", "Electric Lighting Quality", "R"],
-          ["IEQ2.0.2", "Electric Lighting Dimming", "1"],
-          ["IEQ2.0.3", "Electric Lighting Luminaire Color", "1"]
-        ]},
-        { "name": "3) Indoor Air Quality", "credits": [
-          ["IEQ3.0", "Minimum Requirements: Ventilation, Filtration & Moisture Control", null],
-          ["IEQ3.0.1", "Permanent Ventilation", "R"],
-          ["IEQ3.0.2", "Increased Ventilation", "1"],
-          ["IEQ3.1", "Outdoor Moisture Management", "R"],
-          ["IEQ3.2", "Low-Emitting Interior Finishes", "R-1"],
-          ["IEQ3.3", "Low-Emitting Furniture", "1"],
-          ["IEQ3.4", "Source Control", "3"],
-          ["IEQ3.5", "Ducted HVAC Returns", "1"],
-          ["IEQ3.6", "Construction IAQ Management", null],
-          ["IEQ3.6.1", "During Construction", "1"],
-          ["IEQ3.6.2", "After Construction", "1"]
-        ]},
-        { "name": "4) Acoustics", "credits": [
-          ["IEQ4.0", "Acoustic Performance", "R"],
-          ["IEQ4.1", "Improved Acoustical Performance", "1"],
-          ["IEQ4.2", "Sound Amplification", "1"],
-          ["IEQ4.3", "Acoustical Consultant", "1"]
-        ]},
-        { "name": "5) Thermal Comfort", "credits": [
-          ["IEQ5.0", "Thermal Code Compliance", "R"],
-          ["IEQ5.1", "Radiant Heated Floors – K–5", "2"]
-        ]},
-        { "name": "6) User Controls", "credits": [
-          ["IEQ6.1", "User Control – Windows", "1"],
-          ["IEQ6.2", "User Control – Temperature", "1"]
-        ]}
+     "name": "5) Outdoor Lighting",
+     "credits": [
+      [
+       "S5.1",
+       "Light Pollution Reduction",
+       "1"
       ]
-    },
-    {
-      "id": "ieo", "name": "Integration, Education and Operations", "total": 45,
-      "groups": [
-        { "name": "1) Integration", "credits": [
-          ["IEO1.1", "Integrated Design Workshop", "1"],
-          ["IEO1.2", "Enhanced Integrated Design", "1-2"],
-          ["IEO1.3", "Durability", "1"],
-          ["IEO1.4", "Faculty and Staff Changing and Shower Facilities", "1"],
-          ["IEO1.5", "Innovation", "1-2"],
-          ["IEO1.6", "Biophilic Design", "1-3"],
-          ["IEO1.7", "Pursue Additional Funding Sources", "2"],
-          ["IEO1.8", "Safer Schools by Design", "2"]
-        ]},
-        { "name": "2) Education", "credits": [
-          ["IEO2.1", "Green Building Learning", "1-2"]
-        ]},
-        { "name": "3) Operations", "credits": [
-          ["IEO3.0", "Operational Performance Monitoring", "R"],
-          ["IEO3.1", "Post Occupancy Evaluation (POE)", null],
-          ["IEO3.1.1", "POE Occupant Survey", "R"],
-          ["IEO3.1.2", "Comprehensive POE", "2"],
-          ["IEO3.2", "ELCCA/LCCA", null],
-          ["IEO3.2.1", "ELCCA Required Facilities", "R"],
-          ["IEO3.2.2", "ELCCA Other Facilities", "1"],
-          ["IEO3.2.3", "ELCCA Update", "1"],
-          ["IEO3.2.4", "LCCA", "1"],
-          ["IEO3.3", "Monitoring-Based Commissioning", "4"],
-          ["IEO3.4", "Project or District Long-Term Operations", null],
-          ["IEO3.4.0", "Asset Preservation Program (APP) – New Buildings", "R"],
-          ["IEO3.4.1", "Operations and Maintenance Staff Involvement", "R"],
-          ["IEO3.4.2", "Asset Preservation System (APS) on Modernizations", "1"],
-          ["IEO3.4.3", "Green Power and Carbon Offsets", "1-2"],
-          ["IEO3.4.4", "Resource Conservation and GHG Reduction Plan", "1"],
-          ["IEO3.4.5", "IAQ Management Plan", "2"],
-          ["IEO3.4.6", "Integrated Pest Management Program", "1-2"],
-          ["IEO3.4.7", "Transportation Options Program", "1"],
-          ["IEO3.4.8", "Operations and Maintenance Personnel Training", "1-2"],
-          ["IEO3.4.9", "Food-Related Waste Management", "1-2"],
-          ["IEO3.4.10", "Wasted Food Reduction Program", "1, 2-3"],
-          ["IEO3.4.11", "Fuel Efficient Buses and Maintenance Vehicles", "1"],
-          ["IEO3.4.12", "Environmentally Preferable Supplies Purchasing", "1"],
-          ["IEO3.4.13", "Green Cleaning Policy and Program", "1"],
-          ["IEO3.4.14", "Green School Program", "1"]
-        ]}
-      ]
+     ],
+     "purpose": "Eliminate light trespass from the building site, improve night sky access, and reduce development impact on nocturnal environments."
     }
-  ]
+   ]
+  },
+  {
+   "id": "water",
+   "name": "Water",
+   "total": 6,
+   "groups": [
+    {
+     "name": "1) Outdoor Systems",
+     "credits": [
+      [
+       "W1.0",
+       "Landscape Water Use Budget",
+       "R"
+      ],
+      [
+       "W1.1",
+       "Irrigation Water Reduction (50%, 100%)",
+       "1-2"
+      ],
+      [
+       "W1.2",
+       "Control Irrigation Water Use",
+       "R-1"
+      ],
+      [
+       "W1.3",
+       "Irrigation System Testing and Training",
+       "1-2"
+      ],
+      [
+       "W1.4",
+       "Flow Switches and Irrigation Water Meters",
+       "R-1"
+      ]
+     ],
+     "purpose": "Reduce water use for landscaping and ornamentation."
+    },
+    {
+     "name": "2) Indoor Systems",
+     "credits": [
+      [
+       "W2.0",
+       "Lead-Free Potable Water System",
+       "R"
+      ]
+     ],
+     "purpose": "Maximize water efficiency within buildings to reduce the burden on municipal water supply and wastewater systems."
+    }
+   ]
+  },
+  {
+   "id": "materials",
+   "name": "Materials and Waste",
+   "total": 29,
+   "groups": [
+    {
+     "name": "1) Waste Reduction and Efficient Materials Use",
+     "credits": [
+      [
+       "MW1.0",
+       "Storage and Collection of Recyclables and Compostables",
+       "R-2"
+      ],
+      [
+       "MW1.1",
+       "Construction Site Waste Management (50%, 75%, 90%)",
+       "R-3"
+      ],
+      [
+       "MW1.2",
+       "Building Reuse – Structure/Shell (50%, 75%, 95%)",
+       "1-3"
+      ],
+      [
+       "MW1.3",
+       "Building Reuse – Interior Non-Structural Elements (50%)",
+       "1"
+      ],
+      [
+       "MW1.4",
+       "Materials Reuse (5%, 10%)",
+       "1-2"
+      ],
+      [
+       "MW1.5",
+       "PCB/T12 Lighting Removal",
+       "R-1"
+      ]
+     ],
+     "purpose": "Promote the efficient use of materials to reduce the amount of construction and occupant waste."
+    },
+    {
+     "name": "2) Sustainable Materials",
+     "credits": [
+      [
+       "MW2.1",
+       "Recycled Content",
+       "1-2"
+      ],
+      [
+       "MW2.2",
+       "Rapidly Renewable Materials",
+       "1"
+      ],
+      [
+       "MW2.3",
+       "Certified Wood (50%, Chain of Custody)",
+       "1-2"
+      ],
+      [
+       "MW2.4",
+       "Regional/Local Materials",
+       "1-2"
+      ],
+      [
+       "MW2.5",
+       "Environmentally Preferable Products – Multiple Attribute",
+       "1-2"
+      ],
+      [
+       "MW2.6",
+       "Environmental Product Declaration",
+       "2-7"
+      ],
+      [
+       "MW2.7",
+       "Building Materials Health Product Disclosure",
+       "1"
+      ]
+     ],
+     "purpose": "Create healthy indoor learning environments and increase demand for environmentally preferable building products by specifying products with recycled content, rapidly renewable raw materials, wood, and wood-based products from sustainably managed forests and local or Washington manufactured products. Consider the use of materials that minimize or eliminate the need for secondary finishes such as concrete and masonry. Understand the content of building materials by choosing those that provide transparent reporting of multiple environmental attributes including the effects on human health, the effects on the environment and social sustainability."
+    }
+   ]
+  },
+  {
+   "id": "energy",
+   "name": "Energy",
+   "total": 108,
+   "groups": [
+    {
+     "name": "1) Efficiency",
+     "credits": [
+      [
+       "E1.0",
+       "Minimum Energy Performance",
+       null
+      ],
+      [
+       "E1.0.1",
+       "Energy Code Minimum",
+       "R"
+      ],
+      [
+       "E1.0.2",
+       "Energy Star Certified Equipment",
+       "R"
+      ],
+      [
+       "E1.1",
+       "Superior Energy Performance – Prescriptive Component Design",
+       "1-14"
+      ],
+      [
+       "E1.2",
+       "Superior Energy Performance – Whole Building Design",
+       "1-20"
+      ],
+      [
+       "E1.3",
+       "Zero Net Energy",
+       "35"
+      ]
+     ],
+     "purpose": "To reduce the amount of energy used to operate the building through better building design and more efficient systems and equipment. Reducing the building load and energy use reduces the associated costs and environmental impacts."
+    },
+    {
+     "name": "3) Alternative Energy",
+     "credits": [
+      [
+       "E3.1",
+       "On-Site Renewable Energy",
+       null
+      ],
+      [
+       "E3.1.1",
+       "On-Site Renewable Energy",
+       "2-12"
+      ],
+      [
+       "E3.1.2",
+       "Solar Ready",
+       "3"
+      ],
+      [
+       "E3.1.3",
+       "Service Water Heating",
+       "2-8"
+      ]
+     ],
+     "purpose": "To increase the amount of renewable energy used in place of finite and polluting non- renewable energy sources. On-site sources of energy reduce transmission losses and also may serve an educational function."
+    },
+    {
+     "name": "4) Commissioning",
+     "credits": [
+      [
+       "E4.0",
+       "Fundamental Commissioning",
+       "R"
+      ],
+      [
+       "E4.1",
+       "Enhanced Commissioning",
+       "3"
+      ],
+      [
+       "E4.1.1",
+       "Energy Measurement and Verification",
+       "1"
+      ]
+     ],
+     "purpose": "To document that active building systems are designed, installed, and operate per Owner’s Project Requirements (OPR), Basis of Design (BOD) and construction documents (CDs)."
+    },
+    {
+     "name": "5) Metering & Management",
+     "credits": [
+      [
+       "E5.0",
+       "Minimum Energy Metering",
+       "R"
+      ],
+      [
+       "E5.1",
+       "Energy Metering – Other",
+       null
+      ],
+      [
+       "E5.1.1",
+       "Energy Metering System – Not Code Required",
+       "4"
+      ],
+      [
+       "E5.1.2",
+       "Energy Use Metering Display",
+       "4"
+      ],
+      [
+       "E5.2",
+       "Energy Storage",
+       "2"
+      ],
+      [
+       "E6.0",
+       "Building Enclosure Commissioning",
+       "2"
+      ]
+     ],
+     "purpose": "To optimize the building’s energy performance by monitoring and managing current energy used for heating, cooling, ventilation, lighting, and other services."
+    }
+   ]
+  },
+  {
+   "id": "ieq",
+   "name": "Indoor Environmental Quality",
+   "total": 24,
+   "groups": [
+    {
+     "name": "1) Daylighting",
+     "credits": [
+      [
+       "IEQ1.0",
+       "Permanent Shading",
+       "R-1"
+      ],
+      [
+       "IEQ1.1",
+       "Outdoor View Windows",
+       "R-1"
+      ],
+      [
+       "IEQ1.2",
+       "Daylighting Classrooms",
+       "1-4"
+      ]
+     ],
+     "purpose": "Improve student performance and well-being through quality daylighting designs that minimize glare and direct sunlight penetration and integrate views in day lit spaces. Provide a connection between indoor spaces and the outdoor environment through the introduction of daylight and views into the occupied areas of the building. Daylighting is fundamentally important to high performance design, from the standpoint of student and teacher preference, and should be a primary source of illumination in classrooms."
+    },
+    {
+     "name": "2) Electric Lighting Quality",
+     "credits": [
+      [
+       "IEQ2.0",
+       "Electric Lighting Quality",
+       null
+      ],
+      [
+       "IEQ2.0.1",
+       "Electric Lighting Quality",
+       "R"
+      ],
+      [
+       "IEQ2.0.2",
+       "Electric Lighting Dimming",
+       "1"
+      ],
+      [
+       "IEQ2.0.3",
+       "Electric Lighting Luminaire Color",
+       "1"
+      ]
+     ],
+     "purpose": "provide an artificial lighting environmental that promotes effective learning, teaching, and occupant health. All K–12 classrooms must be adaptable to support a wide variety of educational media and learning activities."
+    },
+    {
+     "name": "3) Indoor Air Quality",
+     "credits": [
+      [
+       "IEQ3.0",
+       "Minimum Requirements: Ventilation, Filtration & Moisture Control",
+       null
+      ],
+      [
+       "IEQ3.0.1",
+       "Permanent Ventilation",
+       "R"
+      ],
+      [
+       "IEQ3.0.2",
+       "Increased Ventilation",
+       "1"
+      ],
+      [
+       "IEQ3.1",
+       "Outdoor Moisture Management",
+       "R"
+      ],
+      [
+       "IEQ3.2",
+       "Low-Emitting Interior Finishes",
+       "R-1"
+      ],
+      [
+       "IEQ3.3",
+       "Low-Emitting Furniture",
+       "1"
+      ],
+      [
+       "IEQ3.4",
+       "Source Control",
+       "3"
+      ],
+      [
+       "IEQ3.5",
+       "Ducted HVAC Returns",
+       "1"
+      ],
+      [
+       "IEQ3.6",
+       "Construction IAQ Management",
+       null
+      ],
+      [
+       "IEQ3.6.1",
+       "During Construction",
+       "1"
+      ],
+      [
+       "IEQ3.6.2",
+       "After Construction",
+       "1"
+      ]
+     ]
+    },
+    {
+     "name": "4) Acoustics",
+     "credits": [
+      [
+       "IEQ4.0",
+       "Acoustic Performance",
+       "R"
+      ],
+      [
+       "IEQ4.1",
+       "Improved Acoustical Performance",
+       "1"
+      ],
+      [
+       "IEQ4.2",
+       "Sound Amplification",
+       "1"
+      ],
+      [
+       "IEQ4.3",
+       "Acoustical Consultant",
+       "1"
+      ]
+     ],
+     "purpose": "Provide the acoustical qualities necessary for good speech communication between students and teachers in classrooms and other learning spaces."
+    },
+    {
+     "name": "5) Thermal Comfort",
+     "credits": [
+      [
+       "IEQ5.0",
+       "Thermal Code Compliance",
+       "R"
+      ],
+      [
+       "IEQ5.1",
+       "Radiant Heated Floors – K–5",
+       "2"
+      ]
+     ],
+     "purpose": "Provide consistent thermal comfort to support optimum health, productivity, and comfort."
+    },
+    {
+     "name": "6) User Controls",
+     "credits": [
+      [
+       "IEQ6.1",
+       "User Control – Windows",
+       "1"
+      ],
+      [
+       "IEQ6.2",
+       "User Control – Temperature",
+       "1"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "ieo",
+   "name": "Integration, Education and Operations",
+   "total": 45,
+   "groups": [
+    {
+     "name": "1) Integration",
+     "credits": [
+      [
+       "IEO1.1",
+       "Integrated Design Workshop",
+       "1"
+      ],
+      [
+       "IEO1.2",
+       "Enhanced Integrated Design",
+       "1-2"
+      ],
+      [
+       "IEO1.3",
+       "Durability",
+       "1"
+      ],
+      [
+       "IEO1.4",
+       "Faculty and Staff Changing and Shower Facilities",
+       "1"
+      ],
+      [
+       "IEO1.5",
+       "Innovation",
+       "1-2"
+      ],
+      [
+       "IEO1.6",
+       "Biophilic Design",
+       "1-3"
+      ],
+      [
+       "IEO1.7",
+       "Pursue Additional Funding Sources",
+       "2"
+      ],
+      [
+       "IEO1.8",
+       "Safer Schools by Design",
+       "2"
+      ]
+     ],
+     "purpose": "To have the entire project team incorporate sustainable building strategies in early programming and ongoing design decision-making. This approach helps maximize systems integration and associated efficiencies and cost-benefits, as well as identify other sustainable opportunities."
+    },
+    {
+     "name": "2) Education",
+     "credits": [
+      [
+       "IEO2.1",
+       "Green Building Learning",
+       "1-2"
+      ]
+     ],
+     "purpose": "To engage students and teachers in learning about the benefits of green building, using their own building as a learning tool."
+    },
+    {
+     "name": "3) Operations",
+     "credits": [
+      [
+       "IEO3.0",
+       "Operational Performance Monitoring",
+       "R"
+      ],
+      [
+       "IEO3.1",
+       "Post Occupancy Evaluation (POE)",
+       null
+      ],
+      [
+       "IEO3.1.1",
+       "POE Occupant Survey",
+       "R"
+      ],
+      [
+       "IEO3.1.2",
+       "Comprehensive POE",
+       "2"
+      ],
+      [
+       "IEO3.2",
+       "ELCCA/LCCA",
+       null
+      ],
+      [
+       "IEO3.2.1",
+       "ELCCA Required Facilities",
+       "R"
+      ],
+      [
+       "IEO3.2.2",
+       "ELCCA Other Facilities",
+       "1"
+      ],
+      [
+       "IEO3.2.3",
+       "ELCCA Update",
+       "1"
+      ],
+      [
+       "IEO3.2.4",
+       "LCCA",
+       "1"
+      ],
+      [
+       "IEO3.3",
+       "Monitoring-Based Commissioning",
+       "4"
+      ],
+      [
+       "IEO3.4",
+       "Project or District Long-Term Operations",
+       null
+      ],
+      [
+       "IEO3.4.0",
+       "Asset Preservation Program (APP) – New Buildings",
+       "R"
+      ],
+      [
+       "IEO3.4.1",
+       "Operations and Maintenance Staff Involvement",
+       "R"
+      ],
+      [
+       "IEO3.4.2",
+       "Asset Preservation System (APS) on Modernizations",
+       "1"
+      ],
+      [
+       "IEO3.4.3",
+       "Green Power and Carbon Offsets",
+       "1-2"
+      ],
+      [
+       "IEO3.4.4",
+       "Resource Conservation and GHG Reduction Plan",
+       "1"
+      ],
+      [
+       "IEO3.4.5",
+       "IAQ Management Plan",
+       "2"
+      ],
+      [
+       "IEO3.4.6",
+       "Integrated Pest Management Program",
+       "1-2"
+      ],
+      [
+       "IEO3.4.7",
+       "Transportation Options Program",
+       "1"
+      ],
+      [
+       "IEO3.4.8",
+       "Operations and Maintenance Personnel Training",
+       "1-2"
+      ],
+      [
+       "IEO3.4.9",
+       "Food-Related Waste Management",
+       "1-2"
+      ],
+      [
+       "IEO3.4.10",
+       "Wasted Food Reduction Program",
+       "1, 2-3"
+      ],
+      [
+       "IEO3.4.11",
+       "Fuel Efficient Buses and Maintenance Vehicles",
+       "1"
+      ],
+      [
+       "IEO3.4.12",
+       "Environmentally Preferable Supplies Purchasing",
+       "1"
+      ],
+      [
+       "IEO3.4.13",
+       "Green Cleaning Policy and Program",
+       "1"
+      ],
+      [
+       "IEO3.4.14",
+       "Green School Program",
+       "1"
+      ]
+     ],
+     "purpose": "To encourage pre-construction and post-construction activities that contribute to the understanding of high-performance schools, as well as implementing operational plans and systems that assure the goals of the high-performance design are achieved once the building is in operation."
+    }
+   ]
+  }
+ ]
 }
