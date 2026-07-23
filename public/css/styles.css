@@ -449,7 +449,9 @@ legend {
   padding: 7px 20px;
   border-top: 1px solid var(--pbk-border);
 }
+.credit-row { cursor: pointer; }
 .credit-row:hover { background: var(--pbk-bg-pale); }
+.credit-row:hover .credit-name { color: var(--pbk-steel); }
 .credit-header-row {
   font-weight: 600;
   color: var(--pbk-ink);

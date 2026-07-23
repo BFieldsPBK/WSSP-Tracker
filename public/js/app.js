@@ -755,13 +755,20 @@ async function renderProject(id) {
       renderProject(id);
     });
   });
-  /* document panels */
+  /* credit detail panels — toggled by the paperclip button or by clicking
+   * anywhere on the row that isn't a control (status, points, upload) */
+  const togglePanel = cid => {
+    if (openDocPanels.has(cid)) openDocPanels.delete(cid);
+    else openDocPanels.add(cid);
+    renderProject(id);
+  };
   view.querySelectorAll("[data-docs-toggle]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const cid = btn.dataset.docsToggle;
-      if (openDocPanels.has(cid)) openDocPanels.delete(cid);
-      else openDocPanels.add(cid);
-      renderProject(id);
+    btn.addEventListener("click", () => togglePanel(btn.dataset.docsToggle));
+  });
+  view.querySelectorAll(".credit-row").forEach(row => {
+    row.addEventListener("click", ev => {
+      if (ev.target.closest("button, select, a, input, label")) return;
+      togglePanel(row.dataset.creditRow);
     });
   });
   view.querySelectorAll(".doc-upload").forEach(input => {
