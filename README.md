@@ -25,10 +25,11 @@ required prerequisites, and certification thresholds — per project.
   stored in the `data/files` folder and are kept even if a credit's
   Yes/Maybe/No status is cleared.
 - **Credit detail panels** — each credit's panel also shows the requirement
-  text auto-extracted from the WSSP 2018 handbook
-  (`config/handbook/wssp-2018-excerpts.json`), any OSPI credit
-  interpretations that apply (a "CIL" badge marks affected credits), and a
-  free-text project note per credit.
+  text auto-extracted from the WSSP handbooks for both editions
+  (`config/handbook/wssp-2018-excerpts.json` and
+  `wssp-2023-excerpts.json`), any OSPI credit interpretations that apply
+  (a "CIL" badge marks affected credits), and a free-text project note per
+  credit.
 - **OSPI Credit Interpretation Library** — all rulings encoded in
   `config/interpretations.json`, browsable from the header nav and surfaced
   inline on the credits they affect in both editions.
@@ -48,8 +49,6 @@ are bundled in `public/vendor/fonts`, so the tool needs no internet access.
 ## Planned
 
 - Client / consultant / contractor access with per-project roles
-- WSSP 2023 handbook requirement excerpts (2018 is done; the 2023 handbook
-  PDF is needed as a source)
 
 ## Running it
 
@@ -68,6 +67,7 @@ protocol definitions, never project data).
 ## Reference documents
 
 - `wssp-2018-final.pdf` — the WSSP 2018 Edition handbook (OSPI), the source
-  for `config/protocols/wssp-2018.json`.
-- `config/protocols/wssp-2023.json` was encoded from the official OSPI
-  WSSP 2023 scorecard workbook.
+  for `config/protocols/wssp-2018.json` and the 2018 credit excerpts.
+- `wssp2023.pdf` — the WSSP 2023 handbook (OSPI), the source for the 2023
+  credit excerpts. `config/protocols/wssp-2023.json` was encoded from the
+  official OSPI WSSP 2023 scorecard workbook.
