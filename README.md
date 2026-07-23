@@ -19,6 +19,11 @@ required prerequisites, and certification thresholds — per project.
   the project's certification threshold, which is computed from project type
   (new / new building on existing / modernization) and district class
   (Class I ≥ 2,000 FTE, Class II below).
+- **Supporting documentation per credit** — upload compliance evidence
+  (agreements, calculations, submittals; up to 25 MB per file) directly on
+  each credit via the paperclip button, with download and remove. Files are
+  stored in the `data/files` folder and are kept even if a credit's
+  Yes/Maybe/No status is cleared.
 
 The visual design follows the shared PBK design system (Barlow Semi
 Condensed + Source Sans 3, navy/red brand palette, white cards on a pale
@@ -28,7 +33,7 @@ are bundled in `public/vendor/fonts`, so the tool needs no internet access.
 ## Planned
 
 - Client / consultant / contractor access with per-project roles
-- Supporting documentation uploads per credit
+- Credit detail pages with handbook requirement text
 - OSPI credit interpretation library surfaced on credit pages
 - OSPI-ready compliance report export
 

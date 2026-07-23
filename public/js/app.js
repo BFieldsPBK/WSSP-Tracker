@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 1;
+const API_VERSION = 2;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {
@@ -110,6 +110,15 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
+function formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+const CLIP_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.4 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`;
+
+/* Credits whose document panel is open, so panels survive re-renders. */
+const openDocPanels = new Set();
 
 /* ── Routes ──────────────────────────────────────────────────── */
 async function route() {
@@ -312,18 +321,38 @@ async function renderProject(id) {
               `<option value="${n}" ${n === (entry?.points ?? 0) ? "selected" : ""}>${n} pt${n > 1 ? "s" : ""}</option>`).join("")}
             ${entry?.points === undefined ? `<option value="" selected>pts?</option>` : ""}
           </select>` : "";
+        const docs = (project.documents || {})[cid] || [];
+        const panelOpen = openDocPanels.has(cid);
+        const docPanel = panelOpen ? `
+          <div class="doc-panel" data-doc-panel="${cid}">
+            ${docs.length ? docs.map(d => `
+              <div class="doc-item">
+                <a href="/api/projects/${project.id}/files/${d.id}" download>${esc(d.name)}</a>
+                <span class="doc-meta">${formatBytes(d.size)} · ${new Date(d.uploadedAt).toLocaleDateString()}</span>
+                <button type="button" class="doc-remove" data-file="${d.id}" title="Remove file">&times;</button>
+              </div>`).join("")
+            : `<div class="doc-empty">No supporting documentation yet.</div>`}
+            <label class="upload-label">
+              + Upload document <span class="doc-meta">(max 25 MB)</span>
+              <input type="file" class="doc-upload" data-credit="${cid}" hidden>
+            </label>
+          </div>` : "";
         return `
-          <div class="credit-row" data-credit-row="${cid}">
+          <div class="credit-row ${panelOpen ? "docs-open" : ""}" data-credit-row="${cid}">
             <span class="credit-id">${esc(cid)}</span>
             <span class="credit-name">${esc(cname)}${pts.required ? '<span class="credit-req">REQ</span>' : ""}</span>
             ${pointsSel}
+            <button type="button" class="doc-btn ${docs.length ? "has-docs" : ""} ${panelOpen ? "open" : ""}"
+              data-docs-toggle="${cid}" title="Supporting documentation">
+              ${CLIP_SVG}<span>${docs.length || ""}</span>
+            </button>
             <span class="credit-pts">${pts.max > 0 ? esc(pts.label) : "Req"}</span>
             <span class="status-seg" data-credit="${cid}" role="group" aria-label="Status for ${esc(cid)}">
               <button type="button" data-status="yes"   class="${status === "yes" ? "on-yes" : ""}">Yes</button>
               <button type="button" data-status="maybe" class="${status === "maybe" ? "on-maybe" : ""}">Maybe</button>
               <button type="button" data-status="no"    class="${status === "no" ? "on-no" : ""}">No</button>
             </span>
-          </div>`;
+          </div>${docPanel}`;
       }).join("")}
     `).join("");
     return `
@@ -422,6 +451,38 @@ async function renderProject(id) {
       const current = project.credits[creditId] || { status: "maybe" };
       await api("PUT", `/api/projects/${id}/credits/${creditId}`,
         { status: current.status, points: Number(sel.value) });
+      renderProject(id);
+    });
+  });
+  /* document panels */
+  view.querySelectorAll("[data-docs-toggle]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const cid = btn.dataset.docsToggle;
+      if (openDocPanels.has(cid)) openDocPanels.delete(cid);
+      else openDocPanels.add(cid);
+      renderProject(id);
+    });
+  });
+  view.querySelectorAll(".doc-upload").forEach(input => {
+    input.addEventListener("change", async () => {
+      if (!input.files.length) return;
+      const fd = new FormData();
+      fd.append("file", input.files[0]);
+      const res = await fetch(`/api/projects/${id}/credits/${input.dataset.credit}/files`, {
+        method: "POST", body: fd
+      });
+      if (!res.ok) {
+        let msg = `Upload failed (${res.status})`;
+        try { msg = (await res.json()).errors.join("; "); } catch (e) { /* keep default */ }
+        alert(msg);
+      }
+      renderProject(id);
+    });
+  });
+  view.querySelectorAll(".doc-remove").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Remove this file?")) return;
+      await api("DELETE", `/api/projects/${id}/files/${btn.dataset.file}`);
       renderProject(id);
     });
   });

@@ -8,6 +8,7 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const multer = require("multer");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,13 +16,24 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 1;
+const API_VERSION = 2;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
+const FILES_DIR = path.join(DATA_DIR, "files");
 const PROTOCOL_DIR = path.join(__dirname, "config", "protocols");
+const MAX_UPLOAD = 25 * 1024 * 1024; // 25 MB per file, matching PBK's other tools
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!fs.existsSync(FILES_DIR)) fs.mkdirSync(FILES_DIR, { recursive: true });
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: FILES_DIR,
+    filename: (req, file, cb) => cb(null, "file-" + crypto.randomBytes(8).toString("hex"))
+  }),
+  limits: { fileSize: MAX_UPLOAD }
+});
 
 // Atomic write: temp file + rename, so a crash mid-write can't corrupt data.
 function writeFileAtomic(file, data) {
@@ -175,12 +187,77 @@ app.put("/api/projects/:id/credits/:creditId", (req, res) => {
   res.json(p);
 });
 
+/* ── Credit documentation ────────────────────────────────────── *
+ * Files live in data/files under random names; the original name and
+ * which credit each file supports are recorded on the project. Documents
+ * are kept separate from credit status entries, so clearing a credit's
+ * Yes/Maybe/No never discards its uploaded evidence. */
+
+function allDocuments(p) {
+  return Object.values(p.documents || {}).flat();
+}
+
+app.post("/api/projects/:id/credits/:creditId/files", upload.single("file"), (req, res) => {
+  const p = findProject(req, res);
+  if (!p) return;
+  if (!req.file) return res.status(400).json({ errors: ["No file received"] });
+  if (!p.documents) p.documents = {};
+  const list = p.documents[req.params.creditId] || (p.documents[req.params.creditId] = []);
+  list.push({
+    id: crypto.randomBytes(6).toString("hex"),
+    name: req.file.originalname,
+    size: req.file.size,
+    storedName: req.file.filename,
+    uploadedAt: new Date().toISOString()
+  });
+  p.updatedAt = new Date().toISOString();
+  saveProjects();
+  res.status(201).json(p);
+});
+
+app.get("/api/projects/:id/files/:fileId", (req, res) => {
+  const p = findProject(req, res);
+  if (!p) return;
+  const doc = allDocuments(p).find(d => d.id === req.params.fileId);
+  if (!doc) return res.status(404).json({ errors: ["File not found"] });
+  res.download(path.join(FILES_DIR, doc.storedName), doc.name);
+});
+
+app.delete("/api/projects/:id/files/:fileId", (req, res) => {
+  const p = findProject(req, res);
+  if (!p) return;
+  for (const [creditId, list] of Object.entries(p.documents || {})) {
+    const idx = list.findIndex(d => d.id === req.params.fileId);
+    if (idx !== -1) {
+      const [doc] = list.splice(idx, 1);
+      if (!list.length) delete p.documents[creditId];
+      try { fs.unlinkSync(path.join(FILES_DIR, doc.storedName)); } catch (e) { /* already gone */ }
+      p.updatedAt = new Date().toISOString();
+      saveProjects();
+      return res.json(p);
+    }
+  }
+  res.status(404).json({ errors: ["File not found"] });
+});
+
 app.delete("/api/projects/:id", (req, res) => {
   const idx = projects.findIndex(p => p.id === req.params.id);
   if (idx === -1) return res.status(404).json({ errors: ["Project not found"] });
-  projects.splice(idx, 1);
+  const [removed] = projects.splice(idx, 1);
+  for (const doc of allDocuments(removed)) {
+    try { fs.unlinkSync(path.join(FILES_DIR, doc.storedName)); } catch (e) { /* already gone */ }
+  }
   saveProjects();
   res.json({ ok: true });
+});
+
+/* Multer errors (e.g. oversize uploads) arrive as thrown errors. */
+app.use((err, req, res, next) => {
+  if (err && err.code === "LIMIT_FILE_SIZE") {
+    return res.status(400).json({ errors: ["File is larger than the 25 MB limit"] });
+  }
+  console.error(err);
+  res.status(500).json({ errors: ["Unexpected server error"] });
 });
 
 /* ── Start ───────────────────────────────────────────────────── */
