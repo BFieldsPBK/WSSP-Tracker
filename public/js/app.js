@@ -316,14 +316,32 @@ async function renderInviteRedeem(token) {
 }
 
 /* ── Project list ────────────────────────────────────────────── */
+/* List controls survive re-renders within a session. */
+let listSort = "number";
+let listQuery = "";
+
+const LIST_SORTS = {
+  number: {
+    label: "Project number",
+    fn: (a, b) => {
+      if (!a.number && !b.number) return a.name.localeCompare(b.name);
+      if (!a.number) return 1;              // projects without a number sort last
+      if (!b.number) return -1;
+      return a.number.localeCompare(b.number, undefined, { numeric: true });
+    }
+  },
+  name: { label: "Project name", fn: (a, b) => a.name.localeCompare(b.name) },
+  recent: { label: "Recently updated", fn: (a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || "") }
+};
+
 async function renderProjectList() {
   const [projects, protocols] = await Promise.all([api("GET", "/api/projects"), loadProtocols()]);
-  const cards = projects
-    .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""))
-    .map(p => `
+  const staff = isStaffUser();
+
+  const card = p => `
       <a class="card project-card" href="#/project/${p.id}">
         <h3>${esc(p.name)}</h3>
-        <div class="meta">${esc(p.district || "—")}${p.city ? " · " + esc(p.city) : ""}${p.number ? " · #" + esc(p.number) : ""}</div>
+        <div class="meta">${p.number ? "#" + esc(p.number) + " · " : ""}${esc(p.district || "—")}${p.city ? " · " + esc(p.city) : ""}</div>
         ${p.contactName ? `<div class="meta card-contact">Contact: ${esc(p.contactName)}</div>` : ""}
         <div class="badges">
           <span class="badge edition">${esc(protocols[p.protocolId]?.name || p.protocolId)}</span>
@@ -331,9 +349,30 @@ async function renderProjectList() {
           <span class="badge">Class ${esc(p.districtClass)}</span>
           ${p.dPhase ? `<span class="badge">${esc(dPhaseInfo(p.dPhase)?.code || p.dPhase)}</span>` : ""}
         </div>
-      </a>`).join("");
+      </a>`;
 
-  const staff = isStaffUser();
+  const visible = () => {
+    const q = listQuery.trim().toLowerCase();
+    const filtered = !q ? projects.slice() : projects.filter(p =>
+      [p.name, p.number, p.district, p.city, p.contactName]
+        .some(v => v && String(v).toLowerCase().includes(q)));
+    return filtered.sort(LIST_SORTS[listSort].fn);
+  };
+
+  const paint = () => {
+    const wrap = document.getElementById("project-grid-wrap");
+    if (!wrap) return;
+    const list = visible();
+    wrap.innerHTML = list.length
+      ? `<div class="project-grid">${list.map(card).join("")}</div>`
+      : `<div class="empty-state card">
+           <h2>${listQuery ? "No matches" : staff ? "No projects yet" : "No active invitations"}</h2>
+           ${listQuery ? `<p>No projects match “${esc(listQuery)}”.</p>`
+             : staff ? `<p>Create your first project to start tracking WSSP credits.</p>
+                        <p><a class="btn btn-primary" href="#/new">+ New Project</a></p>`
+                     : `<p>Your invite may have been revoked or replaced — contact your PBK project contact.</p>`}
+         </div>`;
+  };
   view.innerHTML = `
     <div class="page-head">
       <div>
@@ -345,16 +384,27 @@ async function renderProjectList() {
       </div>
       ${staff ? `<a class="btn btn-primary" href="#/new">+ New Project</a>` : ""}
     </div>
-    ${projects.length ? `<div class="project-grid">${cards}</div>` : `
-      <div class="empty-state card">
-        ${staff ? `
-          <h2>No projects yet</h2>
-          <p>Create your first project to start tracking WSSP credits.</p>
-          <p><a class="btn btn-primary" href="#/new">+ New Project</a></p>` : `
-          <h2>No active invitations</h2>
-          <p>Your invite may have been revoked or replaced — contact your PBK project contact.</p>`}
-      </div>`}
+    <div class="list-controls">
+      <input type="search" id="list-search" placeholder="Search by name, number, district, or contact…"
+        value="${esc(listQuery)}" aria-label="Search projects">
+      <label class="list-sort">Sort by
+        <select id="list-sort" aria-label="Sort projects">
+          ${Object.entries(LIST_SORTS).map(([k, s]) =>
+            `<option value="${k}" ${k === listSort ? "selected" : ""}>${s.label}</option>`).join("")}
+        </select>
+      </label>
+    </div>
+    <div id="project-grid-wrap"></div>
   `;
+  paint();
+  document.getElementById("list-search").addEventListener("input", ev => {
+    listQuery = ev.target.value;
+    paint();
+  });
+  document.getElementById("list-sort").addEventListener("change", ev => {
+    listSort = ev.target.value;
+    paint();
+  });
 }
 
 /* ── Project form (create & edit) ────────────────────────────── */
