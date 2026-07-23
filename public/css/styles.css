@@ -388,7 +388,20 @@ h1 {
 }
 .invite-row .invite-email { font-weight: 600; color: var(--pbk-ink); min-width: 180px; }
 .invite-row .doc-meta { flex: 1; }
-.invite-row.revoked .invite-email { color: var(--pbk-faint); text-decoration: line-through; }
+button.invite-regen {
+  background: none;
+  border: none;
+  font-family: var(--pbk-font);
+  font-size: 13.5px;
+  text-align: left;
+  color: var(--pbk-steel);
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+button.invite-regen:hover { color: var(--pbk-red); }
 
 .badge {
   display: inline-block;

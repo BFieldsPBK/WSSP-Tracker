@@ -942,7 +942,7 @@ async function renderProject(id) {
     </div>
 
     ${staff && sharingOpen.has(id) ? (() => {
-      const invites = project.invites || [];
+      const invites = (project.invites || []).filter(inv => !inv.revoked);
       const fresh = lastInviteLinks[id];
       const freshUrl = fresh ? `${location.origin}${location.pathname}?invite=${fresh.token}` : "";
       const mailto = fresh ? `mailto:${encodeURIComponent(fresh.email)}` +
@@ -971,15 +971,16 @@ async function renderProject(id) {
         ${invites.length ? `
           <div class="invite-list">
             ${invites.map(inv => `
-              <div class="invite-row ${inv.revoked ? "revoked" : ""}">
-                <span class="invite-email">${esc(inv.email)}</span>
+              <div class="invite-row">
+                <button type="button" class="invite-email invite-regen" data-invite="${inv.id}" data-email="${esc(inv.email)}"
+                  title="Click to issue a replacement link for ${esc(inv.email)}">${esc(inv.email)}</button>
                 <span class="doc-meta">Invited ${new Date(inv.createdAt).toLocaleDateString()} by ${esc(inv.createdBy || "")}
-                  · ${inv.lastUsedAt ? "last used " + new Date(inv.lastUsedAt).toLocaleDateString() : "never used"}</span>
-                ${inv.revoked
-                  ? `<span class="badge">Revoked</span>`
-                  : `<button type="button" class="btn btn-quiet invite-revoke" data-invite="${inv.id}">Revoke</button>`}
+                  · ${inv.lastUsedAt ? "last used " + new Date(inv.lastUsedAt).toLocaleDateString() : "never used"}${inv.regeneratedAt ? " · link reissued " + new Date(inv.regeneratedAt).toLocaleDateString() : ""}</span>
+                <button type="button" class="btn btn-quiet invite-revoke" data-invite="${inv.id}">Revoke</button>
               </div>`).join("")}
-          </div>` : `<div class="doc-empty">No invitations yet.</div>`}
+          </div>
+          <div class="doc-meta" style="margin-top:8px;">Click a name to issue a replacement link (if someone loses theirs) — the old link stops working.</div>`
+        : `<div class="doc-empty">No active invitations.</div>`}
       </section>`;
     })() : ""}
 
@@ -1094,6 +1095,16 @@ async function renderProject(id) {
     catch (e) { input.select(); document.execCommand("copy"); }
     copyBtn.textContent = "Copied!";
     setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+  });
+  view.querySelectorAll(".invite-regen").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if (!confirm(`Issue a replacement link for ${btn.dataset.email}? Their old link will stop working (their current session stays signed in).`)) return;
+      try {
+        const result = await api("POST", `/api/projects/${id}/invites/${btn.dataset.invite}/regenerate`);
+        lastInviteLinks[id] = { token: result.token, email: result.invite.email };
+        renderProject(id);
+      } catch (e) { alert(e.message); }
+    });
   });
   view.querySelectorAll(".invite-revoke").forEach(btn => {
     btn.addEventListener("click", async () => {

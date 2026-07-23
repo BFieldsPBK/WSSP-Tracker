@@ -283,6 +283,23 @@ app.post("/api/projects/:id/invites", (req, res) => {
   res.status(201).json({ token, invite: publicInvite(invite) });
 });
 
+/* Reissue a lost link: same invite (existing guest sessions stay valid),
+ * new token — the old link stops working immediately. */
+app.post("/api/projects/:id/invites/:inviteId/regenerate", (req, res) => {
+  if (!requireStaff(req, res)) return;
+  const p = findProject(req, res);
+  if (!p) return;
+  const inv = (p.invites || []).find(i => i.id === req.params.inviteId);
+  if (!inv) return res.status(404).json({ errors: ["Invite not found"] });
+  if (inv.revoked) return res.status(400).json({ errors: ["This invite was revoked — create a new invite instead"] });
+  const token = crypto.randomBytes(24).toString("base64url");
+  inv.tokenHash = sha256(token);
+  inv.regeneratedAt = new Date().toISOString();
+  p.updatedAt = new Date().toISOString();
+  saveProjects();
+  res.json({ token, invite: publicInvite(inv) });
+});
+
 app.delete("/api/projects/:id/invites/:inviteId", (req, res) => {
   if (!requireStaff(req, res)) return;
   const p = findProject(req, res);
