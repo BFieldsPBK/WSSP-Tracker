@@ -1,0 +1,438 @@
+/* WSSP Tracker — frontend.
+ * Hash-routed single-page app: #/ (projects), #/new, #/project/<id>.
+ */
+"use strict";
+
+const API_VERSION = 1;
+
+/* ── API helpers ─────────────────────────────────────────────── */
+async function api(method, url, body) {
+  const res = await fetch(url, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (!res.ok) {
+    let errors = [`Request failed (${res.status})`];
+    try { errors = (await res.json()).errors || errors; } catch (e) { /* keep default */ }
+    throw Object.assign(new Error(errors.join("; ")), { errors });
+  }
+  return res.json();
+}
+
+async function checkVersion() {
+  try {
+    const meta = await api("GET", "/api/meta");
+    if (meta.apiVersion !== API_VERSION) {
+      document.getElementById("version-banner").classList.remove("hidden");
+    }
+  } catch (e) { /* server unreachable; fetches elsewhere will surface it */ }
+}
+
+/* ── Protocol helpers ────────────────────────────────────────── */
+let PROTOCOLS = null; // id -> protocol
+async function loadProtocols() {
+  if (!PROTOCOLS) {
+    const list = await api("GET", "/api/protocols");
+    PROTOCOLS = {};
+    for (const p of list) PROTOCOLS[p.id] = p;
+  }
+  return PROTOCOLS;
+}
+
+/* Point spec strings: "R", "1", "1-2", "R-1", "2-7", "35", "1, 2-3", "1 + 2-3".
+ * required = leading R; header = null spec.
+ * "+" joins additive tiers (max = sum of tier maxima); otherwise the
+ * largest number present is the credit's maximum. */
+function parsePoints(spec) {
+  if (spec === null || spec === undefined) return { header: true, required: false, max: 0 };
+  const required = /^R/i.test(spec);
+  const partMax = s => Math.max(0, ...(s.match(/\d+/g) || []).map(Number));
+  const max = spec.includes("+")
+    ? spec.split("+").reduce((t, part) => t + partMax(part), 0)
+    : partMax(spec);
+  const nums = (spec.match(/\d+/g) || []).map(Number);
+  const min = nums.length ? Math.min(...nums) : 0;
+  return { header: false, required, max, min, label: spec };
+}
+
+const PROJECT_TYPE_NAMES = {
+  new: "New School (Facility)",
+  newBuilding: "New Building on Existing Facility",
+  modernization: "Modernization"
+};
+
+function threshold(protocol, project) {
+  const t = protocol.thresholds[project.projectType];
+  return t ? t[project.districtClass] : null;
+}
+
+/* Walk every scoreable credit of a protocol. */
+function eachCredit(protocol, fn) {
+  for (const cat of protocol.categories)
+    for (const g of cat.groups)
+      for (const [id, name, spec] of g.credits) {
+        const pts = parsePoints(spec);
+        if (!pts.header) fn({ id, name, pts, category: cat });
+      }
+}
+
+/* Points actually claimed for one credit entry. */
+function entryPoints(entry, pts) {
+  if (!entry || entry.status === "no") return 0;
+  if (pts.max === 0) return 0;
+  return entry.points !== undefined ? entry.points : pts.max === pts.min ? pts.max : 0;
+}
+
+function computeScore(protocol, project) {
+  const s = {
+    yes: 0, maybe: 0,
+    reqTotal: 0, reqMet: 0,
+    byCategory: {}
+  };
+  eachCredit(protocol, ({ id, pts, category }) => {
+    const c = s.byCategory[category.id] || (s.byCategory[category.id] = { yes: 0, maybe: 0, reqTotal: 0, reqMet: 0 });
+    const entry = project.credits[id];
+    if (pts.required) {
+      s.reqTotal++; c.reqTotal++;
+      if (entry && entry.status === "yes") { s.reqMet++; c.reqMet++; }
+    }
+    const p = entryPoints(entry, pts);
+    if (entry && entry.status === "yes")   { s.yes += p;   c.yes += p; }
+    if (entry && entry.status === "maybe") { s.maybe += p; c.maybe += p; }
+  });
+  return s;
+}
+
+/* ── Rendering helpers ───────────────────────────────────────── */
+const view = document.getElementById("view");
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* ── Routes ──────────────────────────────────────────────────── */
+async function route() {
+  const hash = location.hash || "#/";
+  try {
+    if (hash === "#/" || hash === "#") return renderProjectList();
+    if (hash === "#/new") return renderProjectForm();
+    let m = hash.match(/^#\/project\/([a-z0-9]+)\/edit$/);
+    if (m) return renderProjectForm(m[1]);
+    m = hash.match(/^#\/project\/([a-z0-9]+)$/);
+    if (m) return renderProject(m[1]);
+    view.innerHTML = `<div class="empty-state card"><h2>Page not found</h2><p><a href="#/">Back to projects</a></p></div>`;
+  } catch (e) {
+    view.innerHTML = `<div class="empty-state card"><h2>Something went wrong</h2><p>${esc(e.message)}</p><p><a href="#/">Back to projects</a></p></div>`;
+  }
+}
+
+/* ── Project list ────────────────────────────────────────────── */
+async function renderProjectList() {
+  const [projects, protocols] = await Promise.all([api("GET", "/api/projects"), loadProtocols()]);
+  const cards = projects
+    .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""))
+    .map(p => `
+      <a class="card project-card" href="#/project/${p.id}">
+        <h3>${esc(p.name)}</h3>
+        <div class="meta">${esc(p.district || "—")}${p.city ? " · " + esc(p.city) : ""}${p.number ? " · #" + esc(p.number) : ""}</div>
+        <div class="badges">
+          <span class="badge edition">${esc(protocols[p.protocolId]?.name || p.protocolId)}</span>
+          <span class="badge">${esc(PROJECT_TYPE_NAMES[p.projectType] || p.projectType)}</span>
+          <span class="badge">Class ${esc(p.districtClass)}</span>
+          ${p.dPhase ? `<span class="badge">${esc(p.dPhase)}</span>` : ""}
+        </div>
+      </a>`).join("");
+
+  view.innerHTML = `
+    <div class="page-head">
+      <div>
+        <p class="kicker">Projects</p>
+        <h1>WSSP Projects</h1>
+        <p class="lede">Track Washington Sustainable Schools Protocol compliance across PBK projects.</p>
+      </div>
+      <a class="btn btn-primary" href="#/new">+ New Project</a>
+    </div>
+    ${projects.length ? `<div class="project-grid">${cards}</div>` : `
+      <div class="empty-state card">
+        <h2>No projects yet</h2>
+        <p>Create your first project to start tracking WSSP credits.</p>
+        <p><a class="btn btn-primary" href="#/new">+ New Project</a></p>
+      </div>`}
+  `;
+}
+
+/* ── Project form (create & edit) ────────────────────────────── */
+async function renderProjectForm(id) {
+  const protocols = await loadProtocols();
+  const editing = !!id;
+  const project = editing ? await api("GET", `/api/projects/${id}`) : {
+    protocolId: "wssp-2023", projectType: "new", districtClass: "I", state: "WA"
+  };
+  const editionLocked = editing && Object.keys(project.credits || {}).length > 0;
+
+  const protoOptions = Object.values(protocols)
+    .sort((a, b) => b.id.localeCompare(a.id))
+    .map(p => `<option value="${p.id}" ${p.id === project.protocolId ? "selected" : ""}>${esc(p.name)} — published ${esc(p.published)}</option>`)
+    .join("");
+
+  const field = (name, label, opts = {}) => `
+    <div class="form-field">
+      <label for="f-${name}">${label}${opts.required ? ' <span class="req">*</span>' : ""}</label>
+      <input id="f-${name}" name="${name}" type="text" value="${esc(project[name] || "")}"
+        ${opts.placeholder ? `placeholder="${esc(opts.placeholder)}"` : ""}>
+      ${opts.hint ? `<span class="hint">${opts.hint}</span>` : ""}
+    </div>`;
+
+  view.innerHTML = `
+    <div class="breadcrumbs"><a href="#/">Projects</a> / ${editing ? esc(project.name) : "New project"}</div>
+    <div class="page-head">
+      <div>
+        <p class="kicker">${editing ? "Edit project" : "New project"}</p>
+        <h1>${editing ? esc(project.name) : "Create a Project"}</h1>
+      </div>
+    </div>
+    <form class="card form-card" id="project-form">
+      <div class="form-errors hidden" id="form-errors"></div>
+
+      <fieldset>
+        <legend>General Information</legend>
+        <div class="form-row">
+          ${field("name", "Project name", { required: true, placeholder: "e.g. Evergreen Middle School Replacement" })}
+          ${field("number", "Project number", { placeholder: "e.g. 24-1234-00" })}
+        </div>
+        <div class="form-row">
+          ${field("district", "School district", { required: true, placeholder: "e.g. Spokane Public Schools" })}
+          <div class="form-field">
+            <label for="f-districtClass">District class <span class="req">*</span></label>
+            <select id="f-districtClass" name="districtClass">
+              <option value="I" ${project.districtClass === "I" ? "selected" : ""}>Class I — 2,000+ FTE students</option>
+              <option value="II" ${project.districtClass === "II" ? "selected" : ""}>Class II — fewer than 2,000 FTE</option>
+            </select>
+            <span class="hint">Sets the minimum points required for WSSP compliance.</span>
+          </div>
+        </div>
+        <div class="form-row">
+          ${field("address", "Street address", { placeholder: "e.g. 1234 School Ave" })}
+          ${field("city", "City", { placeholder: "e.g. Spokane" })}
+        </div>
+        <div class="form-row">
+          ${field("state", "State")}
+          ${field("zip", "ZIP", { placeholder: "e.g. 99201" })}
+        </div>
+        <div class="form-row">
+          ${field("contactName", "Contact name", { placeholder: "District or PBK contact" })}
+          ${field("contactPhone", "Contact phone")}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>WSSP Compliance Basis</legend>
+        <div class="form-row">
+          <div class="form-field">
+            <label for="f-projectType">Project type <span class="req">*</span></label>
+            <select id="f-projectType" name="projectType">
+              ${Object.entries(PROJECT_TYPE_NAMES).map(([v, n]) =>
+                `<option value="${v}" ${project.projectType === v ? "selected" : ""}>${n}</option>`).join("")}
+            </select>
+            <span class="hint">Additions count as modernizations for minimum-point purposes.</span>
+          </div>
+          <div class="form-field">
+            <label for="f-protocolId">WSSP edition <span class="req">*</span></label>
+            <select id="f-protocolId" name="protocolId" ${editionLocked ? "disabled" : ""}>
+              ${protoOptions}
+            </select>
+            <span class="hint">${editionLocked
+              ? "Locked — this project already has scorecard entries."
+              : "SCAP projects apply the edition in effect at D4 approval. A newer edition than required may always be used — never an older one."}</span>
+          </div>
+        </div>
+        <div class="form-row">
+          ${field("dPhase", "D phase", { placeholder: "e.g. D4", hint: "Current SCAP D-Form phase, if applicable." })}
+          <div class="form-field">
+            <label for="f-notes">Notes</label>
+            <input id="f-notes" name="notes" type="text" value="${esc(project.notes || "")}" placeholder="Optional">
+          </div>
+        </div>
+      </fieldset>
+
+      <div class="form-actions">
+        <a class="btn btn-secondary" href="${editing ? "#/project/" + id : "#/"}">Cancel</a>
+        <button class="btn btn-primary" type="submit">${editing ? "Save Changes" : "Create Project"}</button>
+      </div>
+    </form>
+  `;
+
+  document.getElementById("project-form").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const body = {};
+    for (const el of ev.target.querySelectorAll("input[name], select[name]")) {
+      if (!el.disabled) body[el.name] = el.value;
+    }
+    const errBox = document.getElementById("form-errors");
+    try {
+      const saved = editing
+        ? await api("PUT", `/api/projects/${id}`, body)
+        : await api("POST", "/api/projects", body);
+      location.hash = `#/project/${saved.id}`;
+    } catch (e) {
+      errBox.classList.remove("hidden");
+      errBox.innerHTML = `<ul>${(e.errors || [e.message]).map(x => `<li>${esc(x)}</li>`).join("")}</ul>`;
+      errBox.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  });
+}
+
+/* ── Project page (overview + scorecard) ─────────────────────── */
+async function renderProject(id) {
+  const [project, protocols] = await Promise.all([api("GET", `/api/projects/${id}`), loadProtocols()]);
+  const protocol = protocols[project.protocolId];
+  if (!protocol) throw new Error(`Unknown protocol: ${project.protocolId}`);
+
+  const goal = threshold(protocol, project);
+  const score = computeScore(protocol, project);
+  const addressLine = [project.address, project.city, project.state, project.zip].filter(Boolean).join(", ");
+
+  const catSection = cat => {
+    const c = score.byCategory[cat.id] || { yes: 0, maybe: 0, reqTotal: 0, reqMet: 0 };
+    const rows = cat.groups.map(g => `
+      <div class="group-name">${esc(g.name)}</div>
+      ${g.credits.map(([cid, cname, spec]) => {
+        const pts = parsePoints(spec);
+        if (pts.header) {
+          return `<div class="credit-header-row"><span class="credit-id">${esc(cid)}</span><span class="credit-name">${esc(cname)}</span></div>`;
+        }
+        const entry = project.credits[cid];
+        const status = entry ? entry.status : "none";
+        const chosen = entryPoints(entry, pts);
+        const canPickPoints = pts.max > 0 && pts.max !== pts.min && (status === "yes" || status === "maybe");
+        const pointsSel = canPickPoints ? `
+          <select class="points-select" data-credit="${cid}" aria-label="Points for ${esc(cid)}">
+            ${Array.from({ length: pts.max }, (_, i) => i + 1).map(n =>
+              `<option value="${n}" ${n === (entry?.points ?? 0) ? "selected" : ""}>${n} pt${n > 1 ? "s" : ""}</option>`).join("")}
+            ${entry?.points === undefined ? `<option value="" selected>pts?</option>` : ""}
+          </select>` : "";
+        return `
+          <div class="credit-row" data-credit-row="${cid}">
+            <span class="credit-id">${esc(cid)}</span>
+            <span class="credit-name">${esc(cname)}${pts.required ? '<span class="credit-req">REQ</span>' : ""}</span>
+            ${pointsSel}
+            <span class="credit-pts">${pts.max > 0 ? esc(pts.label) : "Req"}</span>
+            <span class="status-seg" data-credit="${cid}" role="group" aria-label="Status for ${esc(cid)}">
+              <button type="button" data-status="yes"   class="${status === "yes" ? "on-yes" : ""}">Yes</button>
+              <button type="button" data-status="maybe" class="${status === "maybe" ? "on-maybe" : ""}">Maybe</button>
+              <button type="button" data-status="no"    class="${status === "no" ? "on-no" : ""}">No</button>
+            </span>
+          </div>`;
+      }).join("")}
+    `).join("");
+    return `
+      <section class="card category cat-${cat.id}">
+        <div class="category-head">
+          <h2>${esc(cat.name)}</h2>
+          <span class="cat-pts">${cat.total} possible pts</span>
+        </div>
+        ${rows}
+        <div class="cat-subtotal">
+          ${c.reqTotal ? `<span>Required: <b>${c.reqMet}/${c.reqTotal}</b></span>` : ""}
+          <span>Yes: <b>${c.yes}</b> pts</span>
+          <span>Maybe: <b>${c.maybe}</b> pts</span>
+        </div>
+      </section>`;
+  };
+
+  const goalPct = goal ? Math.min(100, (score.yes / goal) * 100) : 0;
+  const maybePct = goal ? Math.min(100, ((score.yes + score.maybe) / goal) * 100) : 0;
+
+  view.innerHTML = `
+    <div class="breadcrumbs"><a href="#/">Projects</a> / ${esc(project.name)}</div>
+    <div class="card project-head">
+      <div class="project-head-top">
+        <div>
+          <p class="kicker">${esc(protocol.name)} · ${esc(PROJECT_TYPE_NAMES[project.projectType])}</p>
+          <h1>${esc(project.name)}</h1>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <a class="btn btn-secondary" href="#/project/${id}/edit">Edit Details</a>
+          <button class="btn btn-quiet" id="delete-project" title="Delete project">Delete</button>
+        </div>
+      </div>
+      <div class="project-facts">
+        <div class="fact"><b>District</b><span>${esc(project.district || "—")}</span></div>
+        <div class="fact"><b>District class</b><span>Class ${esc(project.districtClass)}</span></div>
+        <div class="fact"><b>Project number</b><span>${esc(project.number || "—")}</span></div>
+        <div class="fact"><b>D phase</b><span>${esc(project.dPhase || "—")}</span></div>
+        <div class="fact"><b>Address</b><span>${esc(addressLine || "—")}</span></div>
+        <div class="fact"><b>Contact</b><span>${esc([project.contactName, project.contactPhone].filter(Boolean).join(" · ") || "—")}</span></div>
+      </div>
+      ${project.notes ? `<div class="note-box">${esc(project.notes)}</div>` : ""}
+
+      <div class="score-summary">
+        <div class="card stat target"><div class="num">${goal ?? "—"}</div><div class="lbl">Points required</div></div>
+        <div class="card stat yes"><div class="num">${score.yes}</div><div class="lbl">Points — Yes</div></div>
+        <div class="card stat maybe"><div class="num">${score.maybe}</div><div class="lbl">Points — Maybe</div></div>
+        <div class="card stat req"><div class="num">${score.reqMet}/${score.reqTotal}</div><div class="lbl">Required credits met</div></div>
+      </div>
+      <div class="progress-wrap">
+        <div class="progress-track">
+          <div class="progress-maybe" style="width:${maybePct}%"></div>
+          <div class="progress-yes" style="width:${goalPct}%"></div>
+          ${goal ? `<div class="progress-goal" style="left: calc(100% - 3px)"></div>` : ""}
+        </div>
+        <div class="progress-legend">
+          <span><span class="dot" style="background:var(--status-yes)"></span>Yes points</span>
+          <span><span class="dot" style="background:var(--status-maybe)"></span>Maybe (potential)</span>
+          <span><span class="dot" style="background:var(--pbk-red)"></span>Goal: ${goal ?? "—"} pts (${esc(PROJECT_TYPE_NAMES[project.projectType])}, Class ${esc(project.districtClass)})</span>
+        </div>
+      </div>
+      <div class="note-box">
+        All required (“REQ”) credits must be marked <b>Yes</b> and the project must reach
+        <b>${goal ?? "the minimum"}</b> points to comply. ${esc(protocol.name)} grand total:
+        ${protocol.grandTotal} possible points.
+      </div>
+    </div>
+
+    ${protocol.categories.map(catSection).join("")}
+  `;
+
+  /* status + points interactions */
+  view.querySelectorAll(".status-seg").forEach(seg => {
+    seg.addEventListener("click", async ev => {
+      const btn = ev.target.closest("button[data-status]");
+      if (!btn) return;
+      const creditId = seg.dataset.credit;
+      const current = project.credits[creditId];
+      const next = current && current.status === btn.dataset.status ? "none" : btn.dataset.status;
+      const body = { status: next };
+      if (next === "yes" || next === "maybe") {
+        // Fixed-point credits claim their value automatically; ranges start unset.
+        let pts = null;
+        eachCredit(protocol, c => { if (c.id === creditId) pts = c.pts; });
+        if (pts && pts.max > 0 && pts.max === pts.min) body.points = pts.max;
+        else if (current && current.points !== undefined) body.points = current.points;
+      }
+      await api("PUT", `/api/projects/${id}/credits/${creditId}`, body);
+      renderProject(id);
+    });
+  });
+  view.querySelectorAll(".points-select").forEach(sel => {
+    sel.addEventListener("change", async () => {
+      if (sel.value === "") return;
+      const creditId = sel.dataset.credit;
+      const current = project.credits[creditId] || { status: "maybe" };
+      await api("PUT", `/api/projects/${id}/credits/${creditId}`,
+        { status: current.status, points: Number(sel.value) });
+      renderProject(id);
+    });
+  });
+  document.getElementById("delete-project").addEventListener("click", async () => {
+    if (!confirm(`Delete "${project.name}" and its scorecard? This cannot be undone.`)) return;
+    await api("DELETE", `/api/projects/${id}`);
+    location.hash = "#/";
+  });
+}
+
+/* ── Boot ────────────────────────────────────────────────────── */
+window.addEventListener("hashchange", route);
+checkVersion();
+route();

@@ -1,0 +1,16 @@
+{
+  "name": "wssp-tracker",
+  "version": "0.1.0",
+  "description": "PBK tracking tool for Washington Sustainable Schools Protocol (WSSP) compliance",
+  "private": true,
+  "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
