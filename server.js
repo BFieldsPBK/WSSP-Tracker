@@ -552,4 +552,10 @@ app.listen(PORT, () => {
   console.log(`WSSP Tracker running at http://localhost:${PORT}`);
   console.log(`Data folder: ${DATA_DIR}`);
   console.log(`Protocols loaded: ${Object.keys(protocols).join(", ")}`);
+  if (TRUST_EASY_AUTH) {
+    console.log("Staff sign-in: Microsoft SSO (Azure Easy Auth)");
+  } else {
+    console.log(`Staff access code: ${STAFF_CODE}`);
+    console.log(`  (stored in ${STAFF_CODE_FILE}; set STAFF_ACCESS_CODE env to override)`);
+  }
 });
