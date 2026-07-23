@@ -144,6 +144,17 @@ a { color: var(--pbk-steel); }
   margin-left: 8px;
   color: var(--pbk-primary-29);
 }
+.chip-switcher {
+  font-family: var(--pbk-font);
+  font-size: 12.5px;
+  color: var(--pbk-ink);
+  background: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 8px;
+  max-width: 240px;
+  outline: none;
+}
 .chip-signout {
   background: none;
   border: 1px solid rgba(255,255,255,.25);

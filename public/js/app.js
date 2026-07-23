@@ -42,12 +42,25 @@ function isStaffUser() { return ME && ME.authenticated && ME.kind === "staff"; }
 function updateUserChip() {
   const el = document.getElementById("app-user");
   if (!el) return;
+  const guest = ME && ME.authenticated && ME.kind === "guest";
+  // Guests get no "Projects" page — the nav link disappears for them.
+  const navProjects = document.getElementById("nav-projects");
+  if (navProjects) navProjects.style.display = guest ? "none" : "";
   if (!ME || !ME.authenticated) { el.innerHTML = ""; return; }
   const label = ME.kind === "staff"
     ? `${esc(ME.name || ME.email || "Staff")}<span class="chip-role">PBK Staff</span>`
     : `${esc(ME.email || "Guest")}<span class="chip-role">Guest</span>`;
-  el.innerHTML = `<span class="chip-name">${label}</span>
+  // A consultant invited to several projects switches between them here —
+  // a dropdown of only their own invitations, never a project list page.
+  const switcher = guest && (ME.projects || []).length > 1 ? `
+    <select id="guest-switcher" class="chip-switcher" aria-label="Your invited projects">
+      ${ME.projects.map(p => `<option value="${p.id}"
+        ${location.hash === "#/project/" + p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}
+    </select>` : "";
+  el.innerHTML = `${switcher}<span class="chip-name">${label}</span>
     <button type="button" id="sign-out" class="chip-signout">Sign out</button>`;
+  const sw = document.getElementById("guest-switcher");
+  if (sw) sw.addEventListener("change", () => { location.hash = "#/project/" + sw.value; });
   document.getElementById("sign-out").addEventListener("click", async () => {
     await api("POST", "/api/logout");
     ME = null;
@@ -233,7 +246,20 @@ async function route() {
     await loadMe();
     if (!ME.authenticated) return renderLogin();
     if (hash === "#/login") { location.hash = "#/"; return; }
-    if (hash === "#/" || hash === "#") return renderProjectList();
+    if (hash === "#/" || hash === "#") {
+      // Guests never see a project list — they land on their project.
+      if (!isStaffUser()) {
+        const granted = ME.projects || [];
+        if (granted.length) { location.hash = `#/project/${granted[0].id}`; return; }
+        view.innerHTML = `
+          <div class="empty-state card">
+            <h2>No active invitations</h2>
+            <p>Your invite may have been revoked or replaced — contact your PBK project contact.</p>
+          </div>`;
+        return;
+      }
+      return renderProjectList();
+    }
     if (hash === "#/new") return renderProjectForm();
     if (hash === "#/reference") return renderReference();
     m = hash.match(/^#\/project\/([a-z0-9]+)\/report$/);
@@ -860,7 +886,7 @@ async function renderProject(id) {
   const maybePct = goal ? Math.min(100, ((score.yes + score.maybe) / goal) * 100) : 0;
 
   view.innerHTML = `
-    <div class="breadcrumbs"><a href="#/">Projects</a> / ${esc(project.name)}</div>
+    <div class="breadcrumbs">${staff ? `<a href="#/">Projects</a> / ` : ""}${esc(project.name)}</div>
     <div class="card project-head">
       <div class="project-head-top">
         <div>
