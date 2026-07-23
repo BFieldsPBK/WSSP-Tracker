@@ -67,7 +67,10 @@ Two kinds of user:
   deletes, no view of other projects (their home page lists only projects
   they hold invites to). Invites are revocable per person per project, and
   revocation cuts access immediately. The same person can hold invites to
-  several projects at once.
+  several projects at once. Links are **single-use**: the first redemption
+  claims the link and establishes the session; a forwarded copy of a used
+  link is rejected. Clicking an invitee's name reissues a fresh link (for
+  a lost email or a second device) — the old link stops working.
 
 Sessions are HMAC-signed cookies (secret in `data/auth-secret`); invite
 tokens are stored hashed.

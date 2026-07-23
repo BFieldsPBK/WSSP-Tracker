@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 5;
+const API_VERSION = 6;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {
@@ -896,7 +896,7 @@ async function renderProject(id) {
         <div style="display:flex; gap:8px;">
           ${staff ? `
           <a class="btn btn-primary" href="#/project/${id}/report">Export Report</a>
-          <button class="btn btn-secondary" id="share-project">Share</button>
+          <button class="btn btn-secondary" id="share-project">${sharingOpen.has(id) ? "Close Sharing" : "Share"}</button>
           <a class="btn btn-secondary" href="#/project/${id}/edit">Edit Details</a>
           <button class="btn btn-quiet" id="delete-project" title="Delete project">Delete</button>` : ""}
         </div>
@@ -947,16 +947,19 @@ async function renderProject(id) {
       const freshUrl = fresh ? `${location.origin}${location.pathname}?invite=${fresh.token}` : "";
       const mailto = fresh ? `mailto:${encodeURIComponent(fresh.email)}` +
         `?subject=${encodeURIComponent(`Invitation to collaborate: ${project.name} — WSSP Tracker`)}` +
-        `&body=${encodeURIComponent(`You've been invited to collaborate on the WSSP scorecard for ${project.name}.\n\nOpen your invite link to get started — it signs you in automatically, no account needed:\n\n${freshUrl}\n\nYou'll be able to update credit statuses, add notes, and upload supporting documentation for this project.`)}` : "";
+        `&body=${encodeURIComponent(`You've been invited to collaborate on the WSSP scorecard for ${project.name}.\n\nOpen your invite link to get started — it signs you in automatically, no account needed:\n\n${freshUrl}\n\nThe link works once, on the device where you open it, so please don't forward it. You'll be able to update credit statuses, add notes, and upload supporting documentation for this project. If you need to sign in on another device, ask me to reissue your link.`)}` : "";
       return `
       <section class="card sharing-panel">
+        <button type="button" class="sharing-close" id="close-sharing" title="Close sharing panel">&times;</button>
         <div class="sharing-head">
           <h2>Sharing &amp; Invitations</h2>
           <span>Invited collaborators can update this project's scorecard, notes, and documents —
-          they can't edit project details, export the report, delete anything, or see other projects.</span>
+          they can't edit project details, export the report, delete anything, or see other projects.
+          Each link signs in <b>once</b>: a forwarded copy of a used link won't work.</span>
         </div>
         ${fresh ? `
           <div class="invite-fresh">
+            <button type="button" class="sharing-close fresh-close" id="dismiss-fresh" title="Dismiss link">&times;</button>
             <b>Invite link for ${esc(fresh.email)}</b> — send it now; for security it isn't shown again after you leave this page.
             <div class="invite-link-row">
               <input type="text" readonly id="fresh-link" value="${esc(freshUrl)}">
@@ -975,7 +978,7 @@ async function renderProject(id) {
                 <button type="button" class="invite-email invite-regen" data-invite="${inv.id}" data-email="${esc(inv.email)}"
                   title="Click to issue a replacement link for ${esc(inv.email)}">${esc(inv.email)}</button>
                 <span class="doc-meta">Invited ${new Date(inv.createdAt).toLocaleDateString()} by ${esc(inv.createdBy || "")}
-                  · ${inv.lastUsedAt ? "last used " + new Date(inv.lastUsedAt).toLocaleDateString() : "never used"}${inv.regeneratedAt ? " · link reissued " + new Date(inv.regeneratedAt).toLocaleDateString() : ""}</span>
+                  · ${inv.usedAt ? "link used " + new Date(inv.usedAt).toLocaleDateString() : "link not yet used"}${inv.regeneratedAt ? " · reissued " + new Date(inv.regeneratedAt).toLocaleDateString() : ""}</span>
                 <button type="button" class="btn btn-quiet invite-revoke" data-invite="${inv.id}">Revoke</button>
               </div>`).join("")}
           </div>
@@ -1076,6 +1079,16 @@ async function renderProject(id) {
   if (shareBtn) shareBtn.addEventListener("click", () => {
     if (sharingOpen.has(id)) sharingOpen.delete(id);
     else sharingOpen.add(id);
+    renderProject(id);
+  });
+  const closeSharing = document.getElementById("close-sharing");
+  if (closeSharing) closeSharing.addEventListener("click", () => {
+    sharingOpen.delete(id);
+    renderProject(id);
+  });
+  const dismissFresh = document.getElementById("dismiss-fresh");
+  if (dismissFresh) dismissFresh.addEventListener("click", () => {
+    delete lastInviteLinks[id];
     renderProject(id);
   });
   const inviteForm = document.getElementById("invite-form");

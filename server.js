@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 5;
+const API_VERSION = 6;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -294,6 +294,7 @@ app.post("/api/projects/:id/invites/:inviteId/regenerate", (req, res) => {
   if (inv.revoked) return res.status(400).json({ errors: ["This invite was revoked — create a new invite instead"] });
   const token = crypto.randomBytes(24).toString("base64url");
   inv.tokenHash = sha256(token);
+  inv.usedAt = null;             // a reissued link is fresh: usable once again
   inv.regeneratedAt = new Date().toISOString();
   p.updatedAt = new Date().toISOString();
   saveProjects();
@@ -322,9 +323,18 @@ app.post("/api/invites/redeem", (req, res) => {
     if (inv.revoked) {
       return res.status(410).json({ errors: ["This invite link has been revoked. Contact your PBK project contact for a new one."] });
     }
+    // Staff previewing a link neither consumes it nor downgrades their session.
+    if (isStaff(req)) return res.json({ projectId: p.id, projectName: p.name, staff: true });
+    // Links are single-use: the first redemption claims it. The holder's own
+    // session may re-redeem (e.g. re-clicking the email), but a forwarded
+    // copy of an already-used link is dead.
+    const alreadyMine = validGrants(req).some(g => g.inv === inv.id);
+    if (inv.usedAt && !alreadyMine) {
+      return res.status(410).json({ errors: ["This invite link has already been used. For security, each link works once — ask your PBK project contact to reissue yours."] });
+    }
+    if (!inv.usedAt) inv.usedAt = new Date().toISOString();
     inv.lastUsedAt = new Date().toISOString();
     saveProjects();
-    if (isStaff(req)) return res.json({ projectId: p.id, projectName: p.name, staff: true });
     // Merge into any existing guest session so one consultant can hold
     // invites to several projects at once.
     const gs = validGrants(req).filter(g => g.p !== p.id);
