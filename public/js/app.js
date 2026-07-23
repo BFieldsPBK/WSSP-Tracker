@@ -220,6 +220,14 @@ async function route() {
   const hash = location.hash || "#/";
   try {
     // Invite links work with no prior session — the link is the credential.
+    // Tokens travel in the query string (?invite=...) because URL fragments
+    // are dropped by redirect flows (port-forwarding interstitials, email
+    // link scanners); the legacy #/invite/ form still works.
+    const qtoken = new URLSearchParams(location.search).get("invite");
+    if (qtoken) {
+      history.replaceState(null, "", location.pathname);
+      return renderInviteRedeem(qtoken);
+    }
     let m = hash.match(/^#\/invite\/([A-Za-z0-9_-]+)$/);
     if (m) return renderInviteRedeem(m[1]);
     await loadMe();
@@ -910,7 +918,7 @@ async function renderProject(id) {
     ${staff && sharingOpen.has(id) ? (() => {
       const invites = project.invites || [];
       const fresh = lastInviteLinks[id];
-      const freshUrl = fresh ? `${location.origin}${location.pathname}#/invite/${fresh.token}` : "";
+      const freshUrl = fresh ? `${location.origin}${location.pathname}?invite=${fresh.token}` : "";
       const mailto = fresh ? `mailto:${encodeURIComponent(fresh.email)}` +
         `?subject=${encodeURIComponent(`Invitation to collaborate: ${project.name} — WSSP Tracker`)}` +
         `&body=${encodeURIComponent(`You've been invited to collaborate on the WSSP scorecard for ${project.name}.\n\nOpen your invite link to get started — it signs you in automatically, no account needed:\n\n${freshUrl}\n\nYou'll be able to update credit statuses, add notes, and upload supporting documentation for this project.`)}` : "";
