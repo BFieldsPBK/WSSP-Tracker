@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 10;
+const API_VERSION = 11;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {
@@ -49,7 +49,7 @@ function updateUserChip() {
   if (!ME || !ME.authenticated) { el.innerHTML = ""; return; }
   const label = ME.kind === "staff"
     ? `${esc(ME.name || ME.email || "Staff")}<span class="chip-role">PBK Staff</span>`
-    : `${esc(ME.email || "Guest")}<span class="chip-role">Guest</span>`;
+    : `${esc(ME.name && ME.name !== ME.email ? ME.name : ME.email || "Guest")}<span class="chip-role">Guest</span>`;
   // A consultant invited to several projects switches between them here —
   // a dropdown of only their own invitations, never a project list page.
   const switcher = guest && (ME.projects || []).length > 1 ? `
@@ -104,19 +104,31 @@ function interpretationsFor(protocolId, creditId) {
 }
 
 /* Point spec strings: "R", "1", "1-2", "R-1", "2-7", "35", "1, 2-3", "1 + 2-3".
- * required = leading R; header = null spec.
- * "+" joins additive tiers (max = sum of tier maxima); otherwise the
- * largest number present is the credit's maximum. */
+ * required = leading R; header = null spec. `allowed` is the exact list of
+ * claimable point values (mirrors parsePointSpec in server.js):
+ *   "2-7" -> 2..7 · "1, 2-3" -> 1,2,3 · "R-3" -> tiers 1..3 · "1 + 2-3" -> 1..4 */
 function parsePoints(spec) {
-  if (spec === null || spec === undefined) return { header: true, required: false, max: 0 };
+  if (spec === null || spec === undefined) return { header: true, required: false, max: 0, allowed: [] };
   const required = /^R/i.test(spec);
-  const partMax = s => Math.max(0, ...(s.match(/\d+/g) || []).map(Number));
-  const max = spec.includes("+")
-    ? spec.split("+").reduce((t, part) => t + partMax(part), 0)
-    : partMax(spec);
-  const nums = (spec.match(/\d+/g) || []).map(Number);
-  const min = nums.length ? Math.min(...nums) : 0;
-  return { header: false, required, max, min, label: spec };
+  const body = spec.replace(/^R[-–]?\s*/i, "");
+  let allowed = [];
+  if (body.includes("+")) {
+    const partMax = s => Math.max(0, ...(s.match(/\d+/g) || []).map(Number));
+    const total = body.split("+").reduce((t, x) => t + partMax(x), 0);
+    for (let n = 1; n <= total; n++) allowed.push(n);
+  } else if (required && /^\d+$/.test(body.trim())) {
+    for (let n = 1; n <= Number(body.trim()); n++) allowed.push(n);
+  } else {
+    for (const part of body.split(",")) {
+      const m = part.match(/(\d+)\s*[-–]\s*(\d+)/);
+      if (m) { for (let n = Number(m[1]); n <= Number(m[2]); n++) allowed.push(n); }
+      else { const s = part.match(/\d+/); if (s) allowed.push(Number(s[0])); }
+    }
+  }
+  allowed = [...new Set(allowed)].sort((a, b) => a - b);
+  const max = allowed.length ? allowed[allowed.length - 1] : 0;
+  const min = allowed.length ? allowed[0] : 0;
+  return { header: false, required, max, min, allowed, label: spec };
 }
 
 const PROJECT_TYPE_NAMES = {
@@ -213,23 +225,27 @@ function entryPoints(entry, pts) {
   if (pts.max === 0) return 0;
   if (entry.points !== undefined) return entry.points;
   if (pts.required) return 0;
-  return pts.max === pts.min ? pts.max : 0;
+  return pts.allowed.length === 1 ? pts.allowed[0] : 0;
 }
 
 function computeScore(protocol, project) {
   const blank = () => ({
     yes: 0, maybeYes: 0,                    // claimed points
     maybeNoMax: 0, noMax: 0,                // possible points in leaning-no / no credits
-    nYes: 0, nMaybeYes: 0, nMaybeNo: 0, nNo: 0,
+    nYes: 0, nMaybeYes: 0, nMaybeNo: 0, nNo: 0, nNA: 0,
     reqTotal: 0, reqMet: 0
   });
   const s = { ...blank(), byCategory: {} };
+  const exemptions = project.exemptions || {};
+  const notApplicable = project.notApplicable || {};
   eachCredit(protocol, ({ id, pts, category }) => {
     const c = s.byCategory[category.id] || (s.byCategory[category.id] = blank());
+    if (notApplicable[id]) { s.nNA++; c.nNA++; return; }   // out of scope per Table 1
     const entry = project.credits[id];
     if (pts.required) {
       s.reqTotal++; c.reqTotal++;
-      if (entry && entry.status === "yes") { s.reqMet++; c.reqMet++; }
+      // an OSPI exemption (E / V / EX) deems a required credit compliant
+      if ((entry && entry.status === "yes") || exemptions[id]) { s.reqMet++; c.reqMet++; }
     }
     const p = entryPoints(entry, pts);
     if (!entry) return;
@@ -254,11 +270,12 @@ function formatBytes(n) {
 }
 const CLIP_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.4 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`;
 
-/* Credits whose document panel is open, so panels survive re-renders. */
+/* Per-project UI state, keyed "projectId|item" so it survives re-renders
+ * without leaking between projects. Categories start collapsed. */
 const openDocPanels = new Set();
-/* Group purposes open and categories collapsed, keyed to survive re-renders. */
 const openPurposes = new Set();
-const collapsedCats = new Set();
+const expandedCats = new Set();
+const pkey = (projectId, item) => `${projectId}|${item}`;
 /* Sharing panel open state and the most recently created invite link per project. */
 const sharingOpen = new Set();
 const lastInviteLinks = {};
@@ -1005,13 +1022,18 @@ async function renderReport(id) {
   const addressLine = [project.address, project.city, project.state, project.zip].filter(Boolean).join(", ");
   const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
-  /* OSPI final submittals accept only Yes or No — collect unresolved Maybes. */
-  const maybes = [];
-  eachCredit(protocol, ({ id: cid }) => {
+  /* OSPI final submittals accept only Yes or No — collect unresolved Maybes,
+   * required credits marked No without an exemption, and unmarked credits. */
+  const maybes = [], reqNoList = [], unmarked = [];
+  eachCredit(protocol, ({ id: cid, pts }) => {
+    if ((project.notApplicable || {})[cid]) return;
     const e = project.credits[cid];
-    if (e && (e.status === "maybeYes" || e.status === "maybeNo")) maybes.push(cid);
+    if (!e) { unmarked.push(cid); return; }
+    if (e.status === "maybeYes" || e.status === "maybeNo") maybes.push(cid);
+    if (pts.required && e.status === "no" && !(project.exemptions || {})[cid]) reqNoList.push(cid);
   });
   const isDraft = maybes.length > 0;
+  const isBlocked = reqNoList.length > 0;
 
   const mark = (entry, pts) => {
     if (!entry) return ["", "", "", ""];
@@ -1033,15 +1055,22 @@ async function renderReport(id) {
         if (pts.header) {
           return `<tr class="parent-row"><td>${esc(cid)}</td><td colspan="6">${esc(cname)}</td></tr>`;
         }
+        if ((project.notApplicable || {})[cid]) {
+          return `<tr class="na-row">
+            <td>${esc(cid)}</td><td>${esc(cname)}</td>
+            <td class="num">N/A</td><td class="num"></td><td class="num"></td><td class="num"></td><td class="num"></td>
+          </tr>`;
+        }
+        const exCode = (project.exemptions || {})[cid] || "";
         const [y, my, mn, n] = mark(project.credits[cid], pts);
         return `<tr>
           <td>${esc(cid)}</td>
           <td>${esc(cname)}</td>
           <td class="num">${esc(pts.label)}</td>
-          <td class="num">${y}</td>
+          <td class="num">${exCode ? esc(exCode) : y}</td>
           <td class="num">${my}</td>
           <td class="num">${mn}</td>
-          <td class="num">${n}</td>
+          <td class="num">${exCode ? "" : n}</td>
         </tr>`;
       }).join("")
     ).join("");
@@ -1093,6 +1122,22 @@ async function renderReport(id) {
       </div>
       <a class="btn btn-secondary" href="#/project/${id}">Resolve on Scorecard</a>
     </div>` : ""}
+    ${isBlocked ? `
+    <div class="no-print maybe-warning blocked-warning">
+      <div>
+        <b>Required credit${reqNoList.length > 1 ? "s" : ""} marked No:</b>
+        <span class="maybe-list">${reqNoList.map(esc).join(", ")}</span> —
+        the project cannot comply as marked. Change to Yes, or record an OSPI exemption (E/V/EX)
+        in the credit's panel on the scorecard.
+      </div>
+      <a class="btn btn-secondary" href="#/project/${id}">Open Scorecard</a>
+    </div>` : ""}
+    ${unmarked.length ? `
+    <div class="no-print note-box" style="margin:0 0 14px; display:flex; justify-content:space-between; align-items:center; gap:14px; flex-wrap:wrap;">
+      <span><b>${unmarked.length} credit${unmarked.length > 1 ? "s are" : " is"} unmarked.</b>
+      The final scorecard should answer every credit — unpursued credits are a No.</span>
+      <button class="btn btn-secondary" id="fill-unmarked-no">Mark All Unmarked as No</button>
+    </div>` : ""}
     <div class="no-print note-box" style="margin:0 0 18px;">
       Use your browser's print dialog to save as PDF. Enable <b>"Background graphics"</b> so shading prints.
     </div>
@@ -1104,8 +1149,9 @@ async function renderReport(id) {
           <div class="report-title">${esc(protocol.name)} Scorecard</div>
           <div class="report-sub">Washington Sustainable Schools Protocol · Prepared ${today}</div>
         </div>
-        <div class="report-verdict ${isDraft ? "draft" : compliant ? "ok" : "pending"}">
+        <div class="report-verdict ${isDraft || isBlocked ? "draft" : compliant ? "ok" : "pending"}">
           ${isDraft ? `DRAFT — ${maybes.length} Maybe${maybes.length > 1 ? "s" : ""} to resolve`
+            : isBlocked ? `Cannot comply — required credit${reqNoList.length > 1 ? "s" : ""} marked No`
             : compliant ? "Meets WSSP requirements" : "In progress"}
         </div>
       </header>
@@ -1155,7 +1201,11 @@ async function renderReport(id) {
         <div class="report-note">Shaded cell is this project's applicable minimum. WSSP is a self-certified,
         CHPS-designed protocol: projects pass based on meeting the required prerequisite credits and the
         minimum point level. Compliance documentation is maintained with district project records and
-        provided to OSPI through the SCAP D-Form process.</div>
+        provided to OSPI through the SCAP D-Form process.${Object.keys(project.exemptions || {}).length
+          ? " E / V / EX in the Yes column denote an OSPI-granted exemption, variance, or exception — the required credit is deemed compliant."
+          : ""}${Object.keys(project.notApplicable || {}).length
+          ? " N/A rows are outside this project's scope per the handbook's Table 1."
+          : ""}</div>
       </div>
 
       <h2 class="report-section">Supporting Documentation Index</h2>
@@ -1178,6 +1228,12 @@ async function renderReport(id) {
       <div class="report-footer">Generated by the PBK WSSP Tracker · ${today} · ${esc(protocol.name)}, published ${esc(protocol.published)}</div>
     </div>
   `;
+  const fillBtn = document.getElementById("fill-unmarked-no");
+  if (fillBtn) fillBtn.addEventListener("click", async () => {
+    if (!confirm(`Mark all ${unmarked.length} unmarked credits as No? This records an explicit No on every credit that has no status.`)) return;
+    const result = await api("POST", `/api/projects/${id}/credits/fill-unmarked-no`);
+    renderReport(id);
+  });
   document.getElementById("print-report").addEventListener("click", () => {
     if (isDraft && !confirm(
       `${maybes.length} credit${maybes.length > 1 ? "s are" : " is"} still marked Maybe (${maybes.slice(0, 8).join(", ")}${maybes.length > 8 ? "…" : ""}).\n\n` +
@@ -1193,15 +1249,22 @@ async function renderProject(id) {
   if (!protocol) throw new Error(`Unknown protocol: ${project.protocolId}`);
   const staff = isStaffUser();
 
+  const exclusiveMap = {}, creditNames = {};
+  for (const cat of protocol.categories)
+    for (const g of cat.groups)
+      for (const [ccid, ccname] of g.credits) creditNames[ccid] = ccname;
+  for (const set of protocol.exclusiveSets || [])
+    for (const c of set) exclusiveMap[c] = set;
+
   const goal = threshold(protocol, project);
   const score = computeScore(protocol, project);
   const addressLine = [project.address, project.city, project.state, project.zip].filter(Boolean).join(", ");
 
   const catSection = cat => {
     const c = score.byCategory[cat.id] || { yes: 0, maybe: 0, reqTotal: 0, reqMet: 0 };
-    const collapsed = collapsedCats.has(cat.id);
+    const collapsed = !expandedCats.has(pkey(id, cat.id));
     const rows = cat.groups.map(g => {
-      const gkey = `${cat.id}|${g.name}`;
+      const gkey = pkey(id, `${cat.id}|${g.name}`);
       const purposeOpen = openPurposes.has(gkey);
       return `
       <div class="group-name ${g.purpose ? "has-purpose" : ""}" ${g.purpose ? `data-purpose-toggle="${esc(gkey)}"` : ""}
@@ -1216,10 +1279,21 @@ async function renderProject(id) {
         }
         const entry = project.credits[cid];
         const status = entry ? entry.status : "none";
-        const chosen = entryPoints(entry, pts);
-        const canPickPoints = pts.max > 0 && (pts.max !== pts.min || pts.required) &&
-          (status === "yes" || status === "maybeYes");
-        const pointOptions = (pts.required ? [0] : []).concat(Array.from({ length: pts.max }, (_, i) => i + 1));
+        const na = !!(project.notApplicable || {})[cid];
+        const exemption = (project.exemptions || {})[cid] || "";
+        // exclusive alternate pathways: gray out unselected alternates
+        let altSelected = null, altConflict = false;
+        const exSet = exclusiveMap[cid];
+        if (exSet) {
+          const others = exSet.filter(o => o !== cid && ["yes", "maybeYes"].includes(project.credits[o]?.status));
+          if (others.length) {
+            altSelected = others[0];
+            altConflict = ["yes", "maybeYes"].includes(status);
+          }
+        }
+        const altDisabled = altSelected && !altConflict;
+        const pointOptions = (pts.required ? [0] : []).concat(pts.allowed);
+        const canPickPoints = pointOptions.length > 1 && (status === "yes" || status === "maybeYes") && !na;
         const pointLabel = n => pts.required
           ? (n === 0 ? "Req only" : `+${n} pt${n > 1 ? "s" : ""}`)
           : `${n} pt${n > 1 ? "s" : ""}`;
@@ -1234,7 +1308,7 @@ async function renderProject(id) {
         const note = (project.creditNotes || {})[cid] || "";
         const interps = interpretationsFor(project.protocolId, cid);
         const excerpt = excerptFor(project.protocolId, cid);
-        const panelOpen = openDocPanels.has(cid);
+        const panelOpen = openDocPanels.has(pkey(id, cid));
         const docPanel = panelOpen ? `
           <div class="doc-panel" data-doc-panel="${cid}">
             ${excerpt ? `
@@ -1252,6 +1326,22 @@ async function renderProject(id) {
                   <p><b>Interpretation.</b> ${esc(i.interpretation)}</p>
                 </div>
               </details>`).join("")}
+            ${staff && pts.required ? `
+            <div class="flag-controls">
+              <label>OSPI exemption
+                <select class="flag-exemption" data-credit="${cid}">
+                  ${["", "E", "V", "EX"].map(v => `<option value="${v}" ${exemption === v ? "selected" : ""}>${
+                    v === "" ? "None" : v === "E" ? "E — Exempt by Law" : v === "V" ? "V — Variance" : "EX — Exception (Not Practicable)"
+                  }</option>`).join("")}
+                </select>
+              </label>
+              ${project.projectType !== "new" ? `
+              <label class="flag-na">
+                <input type="checkbox" class="flag-notapplicable" data-credit="${cid}" ${na ? "checked" : ""}>
+                Not applicable to this project's scope (Table 1)
+              </label>` : ""}
+              <span class="doc-meta">An exemption deems this required credit compliant (per the handbook, note E/V/EX on the scorecard with OSPI's determination letter attached). N/A removes it from the required count for reduced-scope projects.</span>
+            </div>` : ""}
             <div class="note-field">
               <label for="note-${cid}">Project notes for ${esc(cid)}</label>
               <textarea id="note-${cid}" class="credit-note" data-credit="${cid}"
@@ -1270,20 +1360,33 @@ async function renderProject(id) {
               <input type="file" class="doc-upload" data-credit="${cid}" hidden>
             </label>
           </div>` : "";
+        const reqNo = pts.required && status === "no" && !exemption && !na;
+        const flag = status === "maybeYes"
+          ? `<span class="maybe-flag" style="color:${STATUS_COLORS.maybeYes}" title="Maybe Yes">⚑</span>`
+          : status === "maybeNo"
+            ? `<span class="maybe-flag" style="color:#b89a2e" title="Maybe No">⚑</span>` : "";
+        const noteLine = altConflict
+          ? `<div class="credit-note-line conflict">Conflicts with ${esc(altSelected)} — these are alternate pathways; clear one.</div>`
+          : altDisabled
+            ? `<div class="credit-note-line">Alternate pathway — you've selected ${esc(altSelected)} (${esc(creditNames[altSelected] || "")}).</div>`
+            : reqNo
+              ? `<div class="credit-note-line conflict">Required credit marked No — the project cannot comply unless an OSPI exemption is recorded${staff ? " (open this credit's panel)" : ""}.</div>`
+              : "";
         return `
-          <div class="credit-row ${panelOpen ? "docs-open" : ""}" data-credit-row="${cid}">
-            <span class="credit-id">${esc(cid)}</span>
-            <span class="credit-name">${esc(cname)}${pts.required ? '<span class="credit-req">REQ</span>' : ""}${interps.length ? '<span class="cil-badge" title="OSPI interpretation available — open the credit panel">CIL</span>' : ""}</span>
-            ${pointsSel}
+          <div class="credit-row ${panelOpen ? "docs-open" : ""} ${altDisabled ? "credit-alt" : ""} ${na ? "credit-na" : ""}" data-credit-row="${cid}">
+            <span class="credit-id">${flag}${esc(cid)}</span>
+            <span class="credit-name">${esc(cname)}${pts.required ? '<span class="credit-req">REQ</span>' : ""}${exemption ? `<span class="ex-badge" title="OSPI exemption recorded — deemed compliant">${esc(exemption)}</span>` : ""}${na ? '<span class="na-badge" title="Not applicable to this project scope (Table 1)">N/A</span>' : ""}${interps.length ? '<span class="cil-badge" title="OSPI interpretation available — open the credit panel">CIL</span>' : ""}${noteLine}</span>
+            ${na ? "" : pointsSel}
             <button type="button" class="doc-btn ${docs.length ? "has-docs" : ""} ${panelOpen ? "open" : ""}"
               data-docs-toggle="${cid}" title="Supporting documentation">
               ${CLIP_SVG}<span>${docs.length || ""}</span>
             </button>
             <span class="credit-pts">${pts.max > 0 ? esc(pts.label) : "Req"}</span>
+            ${na ? `<span class="status-seg-na">N/A</span>` : `
             <span class="status-seg" data-credit="${cid}" role="group" aria-label="Status for ${esc(cid)}">
-              ${STATUSES.map(st => `<button type="button" data-status="${st}"
+              ${STATUSES.map(st => `<button type="button" data-status="${st}" ${altDisabled ? "disabled" : ""}
                 class="${status === st ? "on-" + st : ""}">${STATUS_LABELS[st]}</button>`).join("")}
-            </span>
+            </span>`}
           </div>${docPanel}`;
       }).join("")}
     `;
@@ -1295,7 +1398,7 @@ async function renderProject(id) {
           <h2>${esc(cat.name)}</h2>
           <span class="cat-pts-wrap">
             <span class="cat-pts">${cat.total} possible pts<span class="chev">${collapsed ? "▸" : "▾"}</span></span>
-            <span class="cat-counts">${c.nYes} Yes · ${c.nMaybeYes} Maybe Yes · ${c.nMaybeNo} Maybe No · ${c.nNo} No</span>
+            <span class="cat-counts">${c.nYes} Yes · ${c.nMaybeYes} Maybe Yes · ${c.nMaybeNo} Maybe No · ${c.nNo} No${c.nNA ? ` · ${c.nNA} N/A` : ""}</span>
           </span>
         </div>
         ${collapsed ? "" : rows + `
@@ -1433,7 +1536,7 @@ async function renderProject(id) {
         let pts = null;
         eachCredit(protocol, c => { if (c.id === creditId) pts = c.pts; });
         if (current && current.points !== undefined) body.points = current.points;
-        else if (pts && pts.max > 0 && pts.max === pts.min && !pts.required) body.points = pts.max;
+        else if (pts && !pts.required && pts.allowed.length === 1) body.points = pts.allowed[0];
       }
       await api("PUT", `/api/projects/${id}/credits/${creditId}`, body);
       renderProject(id);
@@ -1452,8 +1555,9 @@ async function renderProject(id) {
   /* credit detail panels — toggled by the paperclip button or by clicking
    * anywhere on the row that isn't a control (status, points, upload) */
   const togglePanel = cid => {
-    if (openDocPanels.has(cid)) openDocPanels.delete(cid);
-    else openDocPanels.add(cid);
+    const k = pkey(id, cid);
+    if (openDocPanels.has(k)) openDocPanels.delete(k);
+    else openDocPanels.add(k);
     renderProject(id);
   };
   view.querySelectorAll("[data-docs-toggle]").forEach(btn => {
@@ -1469,8 +1573,9 @@ async function renderProject(id) {
   view.querySelectorAll("[data-cat-toggle]").forEach(head => {
     head.addEventListener("click", () => {
       const catId = head.dataset.catToggle;
-      if (collapsedCats.has(catId)) collapsedCats.delete(catId);
-      else collapsedCats.add(catId);
+      const k = pkey(id, catId);
+      if (expandedCats.has(k)) expandedCats.delete(k);
+      else expandedCats.add(k);
       renderProject(id);
     });
   });
@@ -1553,6 +1658,25 @@ async function renderProject(id) {
       if (!confirm("Revoke this invite? The collaborator will immediately lose access to this project.")) return;
       await api("DELETE", `/api/projects/${id}/invites/${btn.dataset.invite}`);
       renderProject(id);
+    });
+  });
+  view.querySelectorAll(".flag-exemption").forEach(sel => {
+    sel.addEventListener("change", async () => {
+      try {
+        await api("PUT", `/api/projects/${id}/credits/${sel.dataset.credit}/flags`, { exemption: sel.value });
+        renderProject(id);
+      } catch (e) { alert(e.message); }
+    });
+  });
+  view.querySelectorAll(".flag-notapplicable").forEach(cb => {
+    cb.addEventListener("change", async () => {
+      if (cb.checked && !confirm("Mark this required credit Not Applicable? Its status will be cleared and it will be excluded from the required-credit count.")) {
+        cb.checked = false; return;
+      }
+      try {
+        await api("PUT", `/api/projects/${id}/credits/${cb.dataset.credit}/flags`, { notApplicable: cb.checked });
+        renderProject(id);
+      } catch (e) { alert(e.message); renderProject(id); }
     });
   });
   view.querySelectorAll(".credit-note").forEach(ta => {

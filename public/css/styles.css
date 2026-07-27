@@ -801,6 +801,67 @@ legend {
 }
 .upload-label:hover { border-color: var(--pbk-steel); background: var(--pbk-bg-light); }
 
+/* status flags, alternate pathways, exemptions, N/A */
+.maybe-flag { margin-right: 5px; font-size: 12px; }
+.credit-row.credit-alt { opacity: .5; }
+.credit-row.credit-alt:hover { opacity: .75; }
+.credit-row.credit-na { background: var(--pbk-bg-pale); }
+.credit-row.credit-na .credit-name { color: var(--pbk-muted); }
+.credit-note-line {
+  font-size: 12px;
+  color: var(--pbk-muted);
+  font-weight: 400;
+  margin-top: 2px;
+}
+.credit-note-line.conflict { color: var(--status-req); font-weight: 600; }
+.status-seg button:disabled { cursor: not-allowed; opacity: .55; }
+.status-seg-na {
+  flex: 0 0 auto;
+  font-family: var(--pbk-font-heading);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  color: var(--pbk-muted);
+  padding: 4px 14px;
+}
+.ex-badge, .na-badge {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+.ex-badge { color: var(--pbk-plum); background: #ece7f0; border: 1px solid var(--pbk-plum); }
+.na-badge { color: var(--pbk-muted); background: var(--pbk-bg-light); border: 1px solid var(--pbk-primary-29); }
+.flag-controls {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  background: #fff;
+  border: 1px solid var(--pbk-border);
+  border-radius: var(--pbk-radius-sm);
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+.flag-controls label { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: var(--pbk-ink); }
+.flag-controls select {
+  font-family: var(--pbk-font);
+  font-size: 13px;
+  border: 1px solid var(--pbk-border);
+  border-radius: 6px;
+  padding: 4px 26px 4px 8px;
+  background: #fff;
+}
+.flag-controls .doc-meta { flex-basis: 100%; }
+.blocked-warning { background: var(--status-req-bg); border-color: var(--status-req); }
+.blocked-warning .maybe-list { color: var(--status-req); }
+.report-table .na-row td { color: var(--pbk-faint); background: var(--pbk-bg-pale); }
+
 /* interpretation + excerpt sections in the credit panel */
 .cil-badge {
   display: inline-block;

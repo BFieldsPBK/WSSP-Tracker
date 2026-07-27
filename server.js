@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 10;
+const API_VERSION = 11;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -62,6 +62,41 @@ if (fs.existsSync(HANDBOOK_DIR)) {
 /* OSPI credit interpretation library. */
 const interpretations = JSON.parse(
   fs.readFileSync(path.join(__dirname, "config", "interpretations.json"), "utf8"));
+
+/* Per-protocol credit metadata for server-side validation: which point
+ * values each credit can legally claim, required flags, and exclusive
+ * alternate-pathway sets. Mirrors parsePoints in public/js/app.js. */
+function parsePointSpec(spec) {
+  const required = /^R/i.test(spec);
+  const body = spec.replace(/^R[-–]?\s*/i, "");
+  let allowed = [];
+  if (body.includes("+")) {
+    const partMax = s => Math.max(0, ...(s.match(/\d+/g) || []).map(Number));
+    const total = body.split("+").reduce((t, x) => t + partMax(x), 0);
+    for (let n = 1; n <= total; n++) allowed.push(n);
+  } else if (required && /^\d+$/.test(body.trim())) {
+    for (let n = 1; n <= Number(body.trim()); n++) allowed.push(n);   // "R-3" -> tiers 1..3
+  } else {
+    for (const part of body.split(",")) {
+      const m = part.match(/(\d+)\s*[-–]\s*(\d+)/);
+      if (m) { for (let n = Number(m[1]); n <= Number(m[2]); n++) allowed.push(n); }
+      else { const s = part.match(/\d+/); if (s) allowed.push(Number(s[0])); }
+    }
+  }
+  allowed = [...new Set(allowed)].sort((a, b) => a - b);
+  return { required, allowed };
+}
+const creditMeta = {};
+for (const p of Object.values(protocols)) {
+  const meta = creditMeta[p.id] = {};
+  for (const cat of p.categories) for (const g of cat.groups) for (const [cid, name, spec] of g.credits) {
+    if (spec === null) continue;
+    meta[cid] = { ...parsePointSpec(spec), name };
+  }
+  for (const set of p.exclusiveSets || []) {
+    for (const cid of set) if (meta[cid]) meta[cid].exclusive = set;
+  }
+}
 
 /* Canonical SCAP D-Form phase keys (see D_PHASES in public/js/app.js).
  * Legacy free-text values like "D4" or "d-5" normalize to these; anything
@@ -563,27 +598,95 @@ app.put("/api/projects/:id/credits/:creditId", (req, res) => {
   if (!requireAccess(req, res, req.params.id)) return;
   const p = findProject(req, res);
   if (!p) return;
+  const creditId = req.params.creditId;
+  const meta = (creditMeta[p.protocolId] || {})[creditId];
+  if (!meta) return res.status(400).json({ errors: [`Unknown credit ${creditId} for ${p.protocolId}`] });
   const { status, points } = req.body || {};
   if (status === null || status === "none") {
-    delete p.credits[req.params.creditId];
+    delete p.credits[creditId];
   } else {
     const normalized = status === "maybe" ? "maybeYes" : status;
     if (!["yes", "maybeYes", "maybeNo", "no"].includes(normalized)) {
       return res.status(400).json({ errors: ["status must be yes, maybeYes, maybeNo, no, or none"] });
     }
+    if ((p.notApplicable || {})[creditId]) {
+      return res.status(400).json({ errors: [`${creditId} is marked Not Applicable for this project's scope`] });
+    }
+    // Alternate compliance pathways are mutually exclusive.
+    if ((normalized === "yes" || normalized === "maybeYes") && meta.exclusive) {
+      const other = meta.exclusive.find(o => o !== creditId &&
+        ["yes", "maybeYes"].includes(p.credits[o]?.status));
+      if (other) {
+        return res.status(400).json({ errors: [
+          `${creditId} is an alternate pathway to ${other} (${creditMeta[p.protocolId][other].name}) — clear ${other} first`] });
+      }
+    }
     const entry = { status: normalized };
-    if (points !== undefined && points !== null) {
+    if ((normalized === "yes" || normalized === "maybeYes") && points !== undefined && points !== null) {
       const n = Number(points);
-      if (!Number.isInteger(n) || n < 0 || n > 99) {
-        return res.status(400).json({ errors: ["points must be a whole number"] });
+      const legal = meta.required ? [0, ...meta.allowed] : meta.allowed;
+      if (!Number.isInteger(n) || (legal.length && !legal.includes(n))) {
+        return res.status(400).json({ errors: [
+          `${creditId} allows ${meta.required ? "0 (req only), " : ""}${meta.allowed.join(", ")} point(s)`] });
       }
       entry.points = n;
     }
-    p.credits[req.params.creditId] = entry;
+    p.credits[creditId] = entry;
   }
   p.updatedAt = new Date().toISOString();
   saveProjects();
   res.json(projectView(p, req));
+});
+
+/* Compliance flags on required credits (staff only): OSPI exemption
+ * notations (E / V / EX deem the credit compliant) and Table 1
+ * not-applicable for reduced-scope projects. */
+app.put("/api/projects/:id/credits/:creditId/flags", (req, res) => {
+  if (!requireStaff(req, res)) return;
+  const p = findProject(req, res);
+  if (!p) return;
+  const creditId = req.params.creditId;
+  const meta = (creditMeta[p.protocolId] || {})[creditId];
+  if (!meta) return res.status(400).json({ errors: [`Unknown credit ${creditId}`] });
+  if (!meta.required) return res.status(400).json({ errors: ["Compliance flags apply to required credits only"] });
+  const { exemption, notApplicable } = req.body || {};
+  if (exemption !== undefined) {
+    if (!["", "E", "V", "EX"].includes(exemption)) {
+      return res.status(400).json({ errors: ["exemption must be E, V, EX, or empty"] });
+    }
+    if (!p.exemptions) p.exemptions = {};
+    if (exemption) p.exemptions[creditId] = exemption;
+    else delete p.exemptions[creditId];
+  }
+  if (notApplicable !== undefined) {
+    if (notApplicable && p.projectType === "new") {
+      return res.status(400).json({ errors: ["Table 1 applicability applies to new-building-on-existing and modernization projects only"] });
+    }
+    if (!p.notApplicable) p.notApplicable = {};
+    if (notApplicable) { p.notApplicable[creditId] = true; delete p.credits[creditId]; }
+    else delete p.notApplicable[creditId];
+  }
+  p.updatedAt = new Date().toISOString();
+  saveProjects();
+  res.json(projectView(p, req));
+});
+
+/* Final-submittal helper (staff only): mark every unmarked credit No. */
+app.post("/api/projects/:id/credits/fill-unmarked-no", (req, res) => {
+  if (!requireStaff(req, res)) return;
+  const p = findProject(req, res);
+  if (!p) return;
+  let filled = 0;
+  for (const cid of Object.keys(creditMeta[p.protocolId] || {})) {
+    if (p.credits[cid] || (p.notApplicable || {})[cid]) continue;
+    p.credits[cid] = { status: "no" };
+    filled++;
+  }
+  if (filled) {
+    p.updatedAt = new Date().toISOString();
+    saveProjects();
+  }
+  res.json({ filled, project: projectView(p, req) });
 });
 
 /* Per-credit notes, stored apart from status entries so clearing a

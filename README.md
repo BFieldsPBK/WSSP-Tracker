@@ -35,8 +35,15 @@ required prerequisites, and certification thresholds — per project.
   inline on the credits they affect in both editions.
 - **Four-state scoring** — credits are marked Yes / Maybe Yes / Maybe No /
   No (matching PBK's integrated design workshop scorecards); Yes and Maybe
-  Yes carry claimed points. Collapsed categories show per-state credit
-  counts.
+  Yes carry claimed points, with flags marking Maybe rows. Point dropdowns
+  offer only each credit's legal values, alternate compliance pathways
+  (E1.1/E1.2/E1.3) are mutually exclusive with unselected alternates
+  grayed out, and the server validates credit ids, point values, and
+  exclusivity on every write. Required credits support OSPI exemption
+  notations (E / V / EX, deemed compliant) and Table 1 not-applicable
+  flags on reduced-scope projects; a required credit marked No is flagged
+  on the scorecard and blocks a clean export. Categories open collapsed
+  with per-state counts in each header.
 - **Project dashboard** — a print-ready gauge dashboard per project
   (visible to staff and invited collaborators): overall points gauge with
   the certification minimum marked, an EUI gauge (baseline vs projected
