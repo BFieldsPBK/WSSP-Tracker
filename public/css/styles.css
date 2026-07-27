@@ -486,6 +486,7 @@ legend {
   padding: 8px 10px;
   outline: none;
 }
+.form-field select { padding-right: 26px; text-overflow: ellipsis; }
 .form-field input:focus,
 .form-field select:focus,
 .form-field textarea:focus {
@@ -534,8 +535,11 @@ legend {
   background: #fff;
   border: 1px solid var(--pbk-border);
   border-radius: 6px;
-  padding: 4px 8px;
+  padding: 4px 26px 4px 8px;   /* right padding clears the native dropdown arrow */
   max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   outline: none;
 }
 .fact-dphase select:focus { border-color: var(--pbk-steel); box-shadow: 0 0 0 3px var(--pbk-bg-light); }
