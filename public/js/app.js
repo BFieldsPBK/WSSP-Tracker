@@ -882,7 +882,7 @@ function euiGaugeSvg({ size = 190, stroke = 20, maxVal, baseline, projected, tic
   return `<svg viewBox="-34 -12 ${size + 68} ${size + 24}" class="gauge" role="img">
     ${parts.join("")}${tickSvg}${needle}
     <text x="${cx}" y="${cy + 34}" class="g-center" text-anchor="middle">${projected ?? "—"}</text>
-    <text x="${cx}" y="${cy + 52}" class="g-center-sub" text-anchor="middle">projected EUI</text>
+    <text x="${cx}" y="${cy + 52}" class="g-center-sub" text-anchor="middle">${projected != null ? "projected EUI" : "awaiting pEUI"}</text>
   </svg>`;
 }
 
@@ -917,7 +917,9 @@ async function renderDashboard(id) {
   const projected = Number(project.projectedEUI) || null;
   const wsspTarget = wsspEuiTarget(project);
   const baseline = Math.max(zeroTool || 0, cbps || 0) || null;   // gauge anchor
-  const euiReady = baseline && projected;
+  // The gauge renders as soon as a baseline sets the targets; the needle
+  // joins later, once the team has a predicted EUI.
+  const euiReady = !!baseline;
   const aiaPct = project.aiaReductionPct !== "" && project.aiaReductionPct != null
     ? Number(project.aiaReductionPct) : 80;
   const aiaTarget = zeroTool ? +(zeroTool * (1 - aiaPct / 100)).toFixed(1) : null;
@@ -964,7 +966,7 @@ async function renderDashboard(id) {
         <div class="dash-gauge-block">
           ${euiReady
             ? euiGaugeSvg({ maxVal: Math.max(baseline, wsspTarget || 0) * 1.05, baseline, projected, ticks: euiTicks })
-            : `<div class="dash-eui-empty">EUI gauge needs a <b>Zero Tool Baseline</b> (or CBPS Baseline) and a <b>Projected EUI</b>${staff ? " — add them under Edit Details" : ""}.</div>`}
+            : `<div class="dash-eui-empty">EUI gauge needs a <b>Zero Tool Baseline</b> (or CBPS Baseline) to place the targets${staff ? " — add it under Edit Details" : ""}. The needle appears once a Projected EUI is entered.</div>`}
           <div class="dash-gauge-caption">
             <b>EUI</b> (kBtu/sf/yr)${zeroTool ? ` — Zero Tool baseline ${zeroTool}` : ""}${cbps ? ` · CBPS baseline ${cbps}` : ""}${projected ? ` · projected ${projected}` : ""}${wsspTarget ? ` · WSSP target ${wsspTarget}` : ""}${aiaTarget != null ? ` · AIA 2030 target ${aiaTarget}` : ""}
             ${wsspTarget ? `<span class="dash-note">WSSP target: CBPS adjusted NC/alteration EUIt for ${esc(project.climateZone)} ${esc(SCHOOL_LEVEL_NAMES[project.schoolLevel] || "")} (WSSP 2023, E1.2).${aiaTarget != null ? ` AIA 2030 target = ${aiaPct}% reduction from the Zero Tool baseline (percentage editable in project details).` : ""}</span>`
