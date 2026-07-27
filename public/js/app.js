@@ -205,11 +205,15 @@ const STATUSES = ["yes", "maybeYes", "maybeNo", "no"];
 const STATUS_LABELS = { yes: "Yes", maybeYes: "Maybe Yes", maybeNo: "Maybe No", no: "No" };
 const STATUS_COLORS = { yes: "#31493c", maybeYes: "#748b58", maybeNo: "#d9bd5f", no: "#9aa4ad", rest: "#eef2f5" };
 
-/* Points actually claimed for one credit entry (yes / maybeYes earn). */
+/* Points actually claimed for one credit entry (yes / maybeYes earn).
+ * For R-n credits (a requirement plus optional points), Yes means the
+ * requirement is satisfied — points above the requirement are opt-in. */
 function entryPoints(entry, pts) {
   if (!entry || entry.status === "no" || entry.status === "maybeNo") return 0;
   if (pts.max === 0) return 0;
-  return entry.points !== undefined ? entry.points : pts.max === pts.min ? pts.max : 0;
+  if (entry.points !== undefined) return entry.points;
+  if (pts.required) return 0;
+  return pts.max === pts.min ? pts.max : 0;
 }
 
 function computeScore(protocol, project) {
@@ -1213,12 +1217,18 @@ async function renderProject(id) {
         const entry = project.credits[cid];
         const status = entry ? entry.status : "none";
         const chosen = entryPoints(entry, pts);
-        const canPickPoints = pts.max > 0 && pts.max !== pts.min && (status === "yes" || status === "maybeYes");
+        const canPickPoints = pts.max > 0 && (pts.max !== pts.min || pts.required) &&
+          (status === "yes" || status === "maybeYes");
+        const pointOptions = (pts.required ? [0] : []).concat(Array.from({ length: pts.max }, (_, i) => i + 1));
+        const pointLabel = n => pts.required
+          ? (n === 0 ? "Req only" : `+${n} pt${n > 1 ? "s" : ""}`)
+          : `${n} pt${n > 1 ? "s" : ""}`;
+        const selectedPts = entry?.points ?? (pts.required ? 0 : undefined);
         const pointsSel = canPickPoints ? `
           <select class="points-select" data-credit="${cid}" aria-label="Points for ${esc(cid)}">
-            ${Array.from({ length: pts.max }, (_, i) => i + 1).map(n =>
-              `<option value="${n}" ${n === (entry?.points ?? 0) ? "selected" : ""}>${n} pt${n > 1 ? "s" : ""}</option>`).join("")}
-            ${entry?.points === undefined ? `<option value="" selected>pts?</option>` : ""}
+            ${pointOptions.map(n =>
+              `<option value="${n}" ${n === selectedPts ? "selected" : ""}>${pointLabel(n)}</option>`).join("")}
+            ${selectedPts === undefined ? `<option value="" selected>pts?</option>` : ""}
           </select>` : "";
         const docs = (project.documents || {})[cid] || [];
         const note = (project.creditNotes || {})[cid] || "";
@@ -1418,11 +1428,12 @@ async function renderProject(id) {
       const next = current && current.status === btn.dataset.status ? "none" : btn.dataset.status;
       const body = { status: next };
       if (next === "yes" || next === "maybeYes") {
-        // Fixed-point credits claim their value automatically; ranges start unset.
+        // Fixed-point credits claim their value automatically; ranges start
+        // unset; R-n credits start at "Req only" (0 extra points).
         let pts = null;
         eachCredit(protocol, c => { if (c.id === creditId) pts = c.pts; });
-        if (pts && pts.max > 0 && pts.max === pts.min) body.points = pts.max;
-        else if (current && current.points !== undefined) body.points = current.points;
+        if (current && current.points !== undefined) body.points = current.points;
+        else if (pts && pts.max > 0 && pts.max === pts.min && !pts.required) body.points = pts.max;
       }
       await api("PUT", `/api/projects/${id}/credits/${creditId}`, body);
       renderProject(id);
