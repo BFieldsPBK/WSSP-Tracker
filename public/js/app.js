@@ -1362,9 +1362,9 @@ async function renderProject(id) {
           </div>` : "";
         const reqNo = pts.required && status === "no" && !exemption && !na;
         const flag = status === "maybeYes"
-          ? `<span class="maybe-flag" style="color:${STATUS_COLORS.maybeYes}" title="Maybe Yes">⚑</span>`
+          ? `<span class="maybe-flag" style="color:#e0af00" title="Maybe Yes">⚑</span>`
           : status === "maybeNo"
-            ? `<span class="maybe-flag" style="color:#b89a2e" title="Maybe No">⚑</span>` : "";
+            ? `<span class="maybe-flag" style="color:#e07000" title="Maybe No">⚑</span>` : "";
         const noteLine = altConflict
           ? `<div class="credit-note-line conflict">Conflicts with ${esc(altSelected)} — these are alternate pathways; clear one.</div>`
           : altDisabled
