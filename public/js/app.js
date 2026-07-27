@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 9;
+const API_VERSION = 10;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {
@@ -721,8 +721,14 @@ async function renderProjectForm(id) {
             hint: "Percent reduction from baseline EUI for the dashboard's AIA 2030 marker — editable as the 2030 Challenge targets change. Defaults to 80." })}
         </div>
         <div class="form-row">
-          ${field("baselineEUI", "Baseline EUI (kBtu/sf/yr)", { placeholder: "e.g. 46", hint: "Modeled baseline, e.g. from the ELCCA." })}
+          ${field("zeroToolBaseline", "Zero Tool Baseline (kBtu/sf/yr)", { placeholder: "e.g. 46",
+            hint: "From Architecture 2030's Zero Tool — the baseline the AIA 2030 target reduces from." })}
+          ${field("cbpsBaseline", "CBPS Baseline (kBtu/sf/yr)", { placeholder: "e.g. 49",
+            hint: "Washington Clean Buildings Performance Standard EUI target (EUIt) for this building." })}
+        </div>
+        <div class="form-row">
           ${field("projectedEUI", "Projected EUI (kBtu/sf/yr)", { placeholder: "e.g. 30", hint: "Predicted EUI of the proposed design (pEUI)." })}
+          <div class="form-field"></div>
         </div>
       </fieldset>
 
@@ -906,16 +912,20 @@ async function renderDashboard(id) {
       </div>`;
   };
 
-  const baseline = Number(project.baselineEUI) || null;
+  const zeroTool = Number(project.zeroToolBaseline) || null;
+  const cbps = Number(project.cbpsBaseline) || null;
   const projected = Number(project.projectedEUI) || null;
   const wsspTarget = wsspEuiTarget(project);
+  const baseline = Math.max(zeroTool || 0, cbps || 0) || null;   // gauge anchor
   const euiReady = baseline && projected;
   const aiaPct = project.aiaReductionPct !== "" && project.aiaReductionPct != null
     ? Number(project.aiaReductionPct) : 80;
+  const aiaTarget = zeroTool ? +(zeroTool * (1 - aiaPct / 100)).toFixed(1) : null;
   const euiTicks = [];
-  if (baseline) euiTicks.push({ key: "base", value: baseline, label: `Baseline ${baseline}` });
+  if (zeroTool) euiTicks.push({ key: "zt", value: zeroTool, label: `Zero Tool ${zeroTool}` });
+  if (cbps && cbps !== zeroTool) euiTicks.push({ key: "cbps", value: cbps, label: `CBPS ${cbps}` });
   if (wsspTarget) euiTicks.push({ key: "wssp", value: wsspTarget, label: `WSSP ${wsspTarget}` });
-  if (baseline) euiTicks.push({ key: "aia", value: +(baseline * (1 - aiaPct / 100)).toFixed(1), label: "AIA 2030" });
+  if (aiaTarget != null) euiTicks.push({ key: "aia", value: aiaTarget, label: `AIA ${aiaTarget}` });
   euiTicks.push({ key: "nz", value: 0, label: "Net Zero" });
 
   view.innerHTML = `
@@ -954,11 +964,11 @@ async function renderDashboard(id) {
         <div class="dash-gauge-block">
           ${euiReady
             ? euiGaugeSvg({ maxVal: Math.max(baseline, wsspTarget || 0) * 1.05, baseline, projected, ticks: euiTicks })
-            : `<div class="dash-eui-empty">EUI gauge needs <b>Baseline EUI</b> and <b>Projected EUI</b>${staff ? " — add them under Edit Details" : ""}.</div>`}
+            : `<div class="dash-eui-empty">EUI gauge needs a <b>Zero Tool Baseline</b> (or CBPS Baseline) and a <b>Projected EUI</b>${staff ? " — add them under Edit Details" : ""}.</div>`}
           <div class="dash-gauge-caption">
-            <b>EUI</b> (kBtu/sf/yr)${baseline ? ` — baseline ${baseline}` : ""}${projected ? ` · projected ${projected}` : ""}${wsspTarget ? ` · WSSP target ${wsspTarget}` : ""}
-            ${wsspTarget ? `<span class="dash-note">WSSP target: CBPS adjusted NC/alteration EUIt for ${esc(project.climateZone)} ${esc(SCHOOL_LEVEL_NAMES[project.schoolLevel] || "")} (WSSP 2023, E1.2). AIA 2030 marker = ${aiaPct}% reduction from baseline (editable in project details).</span>`
-              : `<span class="dash-note">Set school level and climate zone in project details to place the WSSP target marker.</span>`}
+            <b>EUI</b> (kBtu/sf/yr)${zeroTool ? ` — Zero Tool baseline ${zeroTool}` : ""}${cbps ? ` · CBPS baseline ${cbps}` : ""}${projected ? ` · projected ${projected}` : ""}${wsspTarget ? ` · WSSP target ${wsspTarget}` : ""}${aiaTarget != null ? ` · AIA 2030 target ${aiaTarget}` : ""}
+            ${wsspTarget ? `<span class="dash-note">WSSP target: CBPS adjusted NC/alteration EUIt for ${esc(project.climateZone)} ${esc(SCHOOL_LEVEL_NAMES[project.schoolLevel] || "")} (WSSP 2023, E1.2).${aiaTarget != null ? ` AIA 2030 target = ${aiaPct}% reduction from the Zero Tool baseline (percentage editable in project details).` : ""}</span>`
+              : `<span class="dash-note">Set school level and climate zone in project details to place the WSSP target marker.${aiaTarget != null ? ` AIA 2030 target = ${aiaPct}% reduction from the Zero Tool baseline.` : ""}</span>`}
           </div>
         </div>
       </div>

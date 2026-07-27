@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 9;
+const API_VERSION = 10;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -86,6 +86,12 @@ if (fs.existsSync(PROJECTS_FILE)) {
     if (norm !== (p.dPhase || "")) { p.dPhase = norm; migrated = true; }
     for (const entry of Object.values(p.credits || {})) {
       if (entry.status === "maybe") { entry.status = "maybeYes"; migrated = true; }
+    }
+    // baselineEUI renamed to zeroToolBaseline (the AIA 2030 / Zero Tool figure)
+    if (p.baselineEUI !== undefined) {
+      if (!p.zeroToolBaseline) p.zeroToolBaseline = p.baselineEUI;
+      delete p.baselineEUI;
+      migrated = true;
     }
   }
   if (migrated) setImmediate(() => saveProjects());
@@ -451,8 +457,8 @@ const PROJECT_FIELDS = [
   "district", "districtClass", "dPhase",
   "address", "city", "state", "zip",
   "contactName", "contactPhone", "notes",
-  "schoolLevel", "climateZone", "opHours", "baselineEUI", "projectedEUI",
-  "aiaReductionPct"
+  "schoolLevel", "climateZone", "opHours",
+  "zeroToolBaseline", "cbpsBaseline", "projectedEUI", "aiaReductionPct"
 ];
 const PROJECT_TYPES = ["new", "newBuilding", "modernization"];
 const SCHOOL_LEVELS = ["", "es", "ms", "hs", "other"];
@@ -478,7 +484,7 @@ function validateProject(body, { partial } = {}) {
   if (out.opHours !== undefined && !OP_HOURS.includes(out.opHours)) {
     errors.push("opHours must be 50 or 167");
   }
-  for (const f of ["baselineEUI", "projectedEUI"]) {
+  for (const f of ["zeroToolBaseline", "cbpsBaseline", "projectedEUI"]) {
     if (out[f] !== undefined && out[f] !== "" && !(Number(out[f]) >= 0)) {
       errors.push(`${f} must be a non-negative number`);
     }
