@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 12;
+const API_VERSION = 13;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {
@@ -234,6 +234,77 @@ function computeScore(protocol, project) {
     if (entry.status === "no")       { s.noMax += pts.max;      c.noMax += pts.max;      s.nNo++;      c.nNo++; }
   });
   return s;
+}
+
+/* Achievable maximum points, per category and overall, for one project.
+ *
+ * The official scorecard totals sum every credit's maximum, but that
+ * overcounts: alternate pathways (exclusiveSets — E1.1/E1.2/E1.3) allow only
+ * one choice, and the handbook bars some combinations outright
+ * (conflictSets — "Points in E3.1.1–E3.1.3 may not be combined with points
+ * in E1.3"). The real ceiling is the best valid combination.
+ *
+ * Only a handful of credits carry constraints, so we brute-force every
+ * subset of the constrained credits in a category, keep the valid ones, and
+ * take the highest-scoring — honoring the project's own commitments (a
+ * pathway already marked Yes / Maybe Yes locks the choice) and skipping
+ * Table 1 N/A credits. Results never exceed the official category total
+ * (where OSPI prints a lower number, OSPI wins). */
+function achievablePoints(protocol, project) {
+  const notApplicable = (project && project.notApplicable) || {};
+  const committed = id => {
+    const st = project && project.credits && project.credits[id]?.status;
+    return st === "yes" || st === "maybeYes";
+  };
+  const conflicts = {};
+  for (const [a, list] of protocol.conflictSets || [])
+    for (const b of list) {
+      (conflicts[a] || (conflicts[a] = new Set())).add(b);
+      (conflicts[b] || (conflicts[b] = new Set())).add(a);
+    }
+  const exclusiveOf = {};
+  (protocol.exclusiveSets || []).forEach((set, i) => set.forEach(c => { exclusiveOf[c] = i; }));
+  const isConstrained = id => conflicts[id] !== undefined || exclusiveOf[id] !== undefined;
+
+  const out = { total: 0, listedTotal: 0, byCategory: {} };
+  for (const cat of protocol.categories) {
+    let base = 0;       // unconstrained credits always count their maximum
+    const cons = [];    // constrained credits in this category
+    for (const g of cat.groups) for (const [cid, , spec] of g.credits) {
+      const pts = parsePoints(spec);
+      if (pts.header || notApplicable[cid]) continue;
+      if (isConstrained(cid)) cons.push({ id: cid, max: pts.max });
+      else base += pts.max;
+    }
+    let bestAny = 0, bestCommitted = -1;
+    for (let m = 0; m < (1 << cons.length); m++) {
+      const ids = cons.filter((_, i) => m & (1 << i)).map(c => c.id);
+      const sum = cons.reduce((t, c, i) => t + ((m & (1 << i)) ? c.max : 0), 0);
+      let ok = true;
+      const usedSet = {};
+      for (const cid of ids) {
+        const si = exclusiveOf[cid];
+        if (si !== undefined) {
+          if (usedSet[si]) { ok = false; break; }
+          usedSet[si] = true;
+        }
+        if (conflicts[cid] && ids.some(o => conflicts[cid].has(o))) { ok = false; break; }
+      }
+      if (!ok) continue;
+      bestAny = Math.max(bestAny, sum);
+      if (cons.every((c, i) => !committed(c.id) || (m & (1 << i)))) {
+        bestCommitted = Math.max(bestCommitted, sum);
+      }
+    }
+    // If stored data holds an (older, now-invalid) combination, fall back to
+    // the unrestricted best rather than showing nothing sensible.
+    const best = bestCommitted >= 0 ? bestCommitted : bestAny;
+    const capped = cat.total !== undefined ? Math.min(base + best, cat.total) : base + best;
+    out.byCategory[cat.id] = capped;
+    out.total += capped;
+    out.listedTotal += cat.total ?? base + best;
+  }
+  return out;
 }
 
 /* ── Rendering helpers ───────────────────────────────────────── */
@@ -903,10 +974,12 @@ async function renderDashboard(id) {
   const staff = isStaffUser();
   const goal = threshold(protocol, project);
   const score = computeScore(protocol, project);
+  const achievable = achievablePoints(protocol, project);
   const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
   const catCard = cat => {
     const c = score.byCategory[cat.id] || {};
+    const ach = achievable.byCategory[cat.id];
     const segs = [
       { value: c.yes || 0, color: STATUS_COLORS.yes },
       { value: c.maybeYes || 0, color: STATUS_COLORS.maybeYes },
@@ -915,10 +988,10 @@ async function renderDashboard(id) {
     ];
     return `
       <div class="card dash-cat">
-        ${gaugeSvg({ size: 180, stroke: 22, domain: cat.total, segments: segs,
+        ${gaugeSvg({ size: 180, stroke: 22, domain: ach, segments: segs,
           centerTop: String(c.yes || 0), centerBottom: "Yes pts" })}
         <div class="dash-cat-name">${esc(cat.name)}</div>
-        <div class="dash-cat-sub">${cat.total} points possible</div>
+        <div class="dash-cat-sub">${ach} points possible${ach !== cat.total ? ` <span title="Alternate pathways count once and handbook combination limits apply — the OSPI scorecard column sums to ${cat.total}.">*</span>` : ""}</div>
       </div>`;
   };
 
@@ -961,7 +1034,7 @@ async function renderDashboard(id) {
       <div class="dash-section-title">Overall Scores</div>
       <div class="dash-overall">
         <div class="dash-gauge-block">
-          ${gaugeSvg({ size: 230, stroke: 30, domain: protocol.grandTotal,
+          ${gaugeSvg({ size: 230, stroke: 30, domain: achievable.total,
             segments: [
               { value: score.yes, color: STATUS_COLORS.yes },
               { value: score.maybeYes, color: STATUS_COLORS.maybeYes }
@@ -970,7 +1043,7 @@ async function renderDashboard(id) {
             marker: goal ? { value: goal, label: `Min ${goal}` } : null })}
           <div class="dash-gauge-caption">
             <b>Total Points</b> — Yes ${score.yes} · with Maybe Yes ${score.yes + score.maybeYes}
-            · minimum required ${goal ?? "—"} · ${protocol.grandTotal} possible
+            · minimum required ${goal ?? "—"} · ${achievable.total} achievable${achievable.total !== protocol.grandTotal ? ` (scorecard sums to ${protocol.grandTotal})` : ""}
           </div>
         </div>
         <div class="dash-gauge-block">
@@ -1238,15 +1311,21 @@ async function renderProject(id) {
   if (!protocol) throw new Error(`Unknown protocol: ${project.protocolId}`);
   const staff = isStaffUser();
 
-  const exclusiveMap = {}, creditNames = {};
+  const exclusiveMap = {}, conflictMap = {}, creditNames = {};
   for (const cat of protocol.categories)
     for (const g of cat.groups)
       for (const [ccid, ccname] of g.credits) creditNames[ccid] = ccname;
   for (const set of protocol.exclusiveSets || [])
     for (const c of set) exclusiveMap[c] = set;
+  for (const [a, list] of protocol.conflictSets || [])
+    for (const b of list) {
+      (conflictMap[a] || (conflictMap[a] = [])).push(b);
+      (conflictMap[b] || (conflictMap[b] = [])).push(a);
+    }
 
   const goal = threshold(protocol, project);
   const score = computeScore(protocol, project);
+  const achievable = achievablePoints(protocol, project);
   const addressLine = [project.address, project.city, project.state, project.zip].filter(Boolean).join(", ");
 
   const catSection = cat => {
@@ -1280,7 +1359,17 @@ async function renderProject(id) {
             altConflict = ["yes", "maybeYes"].includes(status);
           }
         }
-        const altDisabled = altSelected && !altConflict;
+        // handbook combination bans (e.g. E3.1.x with E1.3 Zero Net Energy):
+        // same graying treatment, different wording
+        let banSelected = null, banConflict = false;
+        if (!altSelected && conflictMap[cid]) {
+          const others = conflictMap[cid].filter(o => ["yes", "maybeYes"].includes(project.credits[o]?.status));
+          if (others.length) {
+            banSelected = others[0];
+            banConflict = ["yes", "maybeYes"].includes(status);
+          }
+        }
+        const altDisabled = (altSelected && !altConflict) || (banSelected && !banConflict);
         const pointOptions = (pts.required ? [0] : []).concat(pts.allowed);
         const canPickPoints = pointOptions.length > 1 && (status === "yes" || status === "maybeYes") && !na;
         const pointLabel = n => pts.required
@@ -1357,11 +1446,15 @@ async function renderProject(id) {
             ? `<span class="maybe-flag" style="color:#e07000" title="Maybe No">⚑</span>` : "";
         const noteLine = altConflict
           ? `<div class="credit-note-line conflict">Conflicts with ${esc(altSelected)} — these are alternate pathways; clear one.</div>`
-          : altDisabled
-            ? `<div class="credit-note-line">Alternate pathway — you've selected ${esc(altSelected)} (${esc(creditNames[altSelected] || "")}).</div>`
-            : reqNo
-              ? `<div class="credit-note-line conflict">Required credit marked No — the project cannot comply unless an OSPI exemption is recorded${staff ? " (open this credit's panel)" : ""}.</div>`
-              : "";
+          : banConflict
+            ? `<div class="credit-note-line conflict">Per the handbook, these points may not be combined with ${esc(banSelected)} (${esc(creditNames[banSelected] || "")}) — clear one.</div>`
+            : altDisabled
+              ? (altSelected
+                ? `<div class="credit-note-line">Alternate pathway — you've selected ${esc(altSelected)} (${esc(creditNames[altSelected] || "")}).</div>`
+                : `<div class="credit-note-line">May not be combined with ${esc(banSelected)} (${esc(creditNames[banSelected] || "")}) per the handbook.</div>`)
+              : reqNo
+                ? `<div class="credit-note-line conflict">Required credit marked No — the project cannot comply unless an OSPI exemption is recorded${staff ? " (open this credit's panel)" : ""}.</div>`
+                : "";
         return `
           <div class="credit-row ${panelOpen ? "docs-open" : ""} ${altDisabled ? "credit-alt" : ""} ${na ? "credit-na" : ""}" data-credit-row="${cid}">
             <span class="credit-id">${flag}${esc(cid)}</span>
@@ -1387,7 +1480,7 @@ async function renderProject(id) {
           title="Click to ${collapsed ? "expand" : "collapse"} this category">
           <h2>${esc(cat.name)}</h2>
           <span class="cat-pts-wrap">
-            <span class="cat-pts">${cat.total} possible pts<span class="chev">${collapsed ? "▸" : "▾"}</span></span>
+            <span class="cat-pts" ${achievable.byCategory[cat.id] !== cat.total ? `title="Best achievable combination for this project — alternate pathways count once and handbook combination limits apply. The OSPI scorecard column sums to ${cat.total}."` : ""}>${achievable.byCategory[cat.id]} possible pts<span class="chev">${collapsed ? "▸" : "▾"}</span></span>
             <span class="cat-counts">${c.nYes} Yes · ${c.nMaybeYes} Maybe Yes · ${c.nMaybeNo} Maybe No · ${c.nNo} No${c.nNA ? ` · ${c.nNA} N/A` : ""}</span>
           </span>
         </div>
@@ -1455,8 +1548,10 @@ async function renderProject(id) {
       </div>
       <div class="note-box">
         All required (“REQ”) credits must be marked <b>Yes</b> and the project must reach
-        <b>${goal ?? "the minimum"}</b> points to comply. ${esc(protocol.name)} grand total:
-        ${protocol.grandTotal} possible points.
+        <b>${goal ?? "the minimum"}</b> points to comply. Achievable maximum for this project:
+        <b>${achievable.total}</b> points${achievable.total !== protocol.grandTotal
+          ? ` (the scorecard's summed total is ${protocol.grandTotal} — alternate energy pathways
+             count once, and the handbook bars combining E3.1.x with E1.3 Zero Net Energy)` : ""}.
       </div>
     </div>
 

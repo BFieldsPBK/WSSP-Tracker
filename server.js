@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 12;
+const API_VERSION = 13;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -109,6 +109,17 @@ for (const p of Object.values(protocols)) {
   }
   for (const set of p.exclusiveSets || []) {
     for (const cid of set) if (meta[cid]) meta[cid].exclusive = set;
+  }
+  /* Handbook combination bans (e.g. "Points in E3.1.1–E3.1.3 may not be
+   * combined with points in E1.3"): each entry is [credit, [barred credits]],
+   * recorded on both sides. Unlike exclusiveSets these aren't alternates —
+   * the barred credits combine freely with each other. */
+  for (const [a, list] of p.conflictSets || []) {
+    for (const b of list) {
+      if (!meta[a] || !meta[b]) continue;
+      (meta[a].conflicts || (meta[a].conflicts = [])).push(b);
+      (meta[b].conflicts || (meta[b].conflicts = [])).push(a);
+    }
   }
 }
 
@@ -687,6 +698,15 @@ app.put("/api/projects/:id/credits/:creditId", (req, res) => {
       if (other) {
         return res.status(400).json({ errors: [
           `${creditId} is an alternate pathway to ${other} (${creditMeta[p.protocolId][other].name}) — clear ${other} first`] });
+      }
+    }
+    // Handbook combination bans (e.g. renewables credits with Zero Net Energy).
+    if ((normalized === "yes" || normalized === "maybeYes") && meta.conflicts) {
+      const other = meta.conflicts.find(o =>
+        ["yes", "maybeYes"].includes(p.credits[o]?.status));
+      if (other) {
+        return res.status(400).json({ errors: [
+          `Per the handbook, points in ${creditId} may not be combined with ${other} (${creditMeta[p.protocolId][other].name}) — clear ${other} first`] });
       }
     }
     const entry = { status: normalized };

@@ -38,8 +38,18 @@ required prerequisites, and certification thresholds — per project.
   Yes carry claimed points, with flags marking Maybe rows. Point dropdowns
   offer only each credit's legal values, alternate compliance pathways
   (E1.1/E1.2/E1.3) are mutually exclusive with unselected alternates
-  grayed out, and the server validates credit ids, point values, and
-  exclusivity on every write. Required credits support OSPI exemption
+  grayed out, handbook combination bans are enforced the same way (points
+  in E3.1.x may not be combined with E1.3 Zero Net Energy — encoded as
+  `conflictSets` in the protocol files), and the server validates credit
+  ids, point values, exclusivity, and combination bans on every write.
+  Category headers and the dashboard show **achievable** possible points —
+  the best valid combination for the project (alternate pathways counted
+  once, combination bans honored, Table 1 N/A credits excluded, and a
+  pathway already selected locks the choice) — rather than the official
+  scorecard's summed column, which double-counts the exclusive pathways
+  (e.g. WSSP 2023 Energy lists 108, but at most 59 is winnable). The
+  export report keeps OSPI's printed totals, since it mirrors the
+  official scorecard. Required credits support OSPI exemption
   notations (E / V / EX, deemed compliant) and Table 1 not-applicable
   flags on reduced-scope projects; a required credit marked No is flagged
   on the scorecard and blocks a clean export. Categories open collapsed
