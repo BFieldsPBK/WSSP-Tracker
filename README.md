@@ -90,9 +90,16 @@ Two kinds of user:
   invitee's name reissues their link, which doubles as a **password
   reset**; a used setup link can never take over an existing account.
 
-Sessions are HMAC-signed cookies (secret in `data/auth-secret`); invite
-tokens are stored hashed; guest passwords are scrypt-hashed in
-`data/guests.json`.
+Sessions are HMAC-signed cookies (secret in `data/auth-secret`, marked
+`Secure` when served over HTTPS); invite tokens are stored hashed; guest
+passwords are scrypt-hashed in `data/guests.json`. Sign-in and
+invite-link endpoints are rate-limited per client address, and
+account-setup links that were never used expire after **14 days**
+(reissuing by clicking the invitee's name starts a fresh window —
+already-activated accounts are unaffected). Credit uploads accept
+documents, spreadsheets, images, and drawings only (PDF, Word, Excel,
+PowerPoint, images, ZIP, DWG/DXF, MSG/EML — never executables or web
+pages).
 
 ## Running it
 

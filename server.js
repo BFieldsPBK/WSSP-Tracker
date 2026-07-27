@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 11;
+const API_VERSION = 12;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -27,12 +27,26 @@ const MAX_UPLOAD = 25 * 1024 * 1024; // 25 MB per file, matching PBK's other too
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(FILES_DIR)) fs.mkdirSync(FILES_DIR, { recursive: true });
 
+/* Compliance evidence is documents, spreadsheets, images, and drawings —
+ * executables, scripts, and web pages have no business here (and HTML/SVG
+ * could carry scripts). Checked by extension; kept in sync with the file
+ * input's accept attribute in public/js/app.js. */
+const UPLOAD_EXTENSIONS = new Set([
+  ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".ppt", ".pptx",
+  ".txt", ".rtf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic",
+  ".tif", ".tiff", ".zip", ".dwg", ".dxf", ".msg", ".eml"
+]);
 const upload = multer({
   storage: multer.diskStorage({
     destination: FILES_DIR,
     filename: (req, file, cb) => cb(null, "file-" + crypto.randomBytes(8).toString("hex"))
   }),
-  limits: { fileSize: MAX_UPLOAD }
+  limits: { fileSize: MAX_UPLOAD },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    if (UPLOAD_EXTENSIONS.has(ext)) return cb(null, true);
+    cb(Object.assign(new Error("File type not allowed"), { code: "BAD_FILE_TYPE", ext }));
+  }
 });
 
 // Atomic write: temp file + rename, so a crash mid-write can't corrupt data.
@@ -98,15 +112,10 @@ for (const p of Object.values(protocols)) {
   }
 }
 
-/* Canonical SCAP D-Form phase keys (see D_PHASES in public/js/app.js).
- * Legacy free-text values like "D4" or "d-5" normalize to these; anything
- * unrecognized is kept as entered. */
-const D_PHASE_KEYS = ["pre-d3", "d3", "d4", "d5", "d7", "d9", "d11", "annual"];
-function normalizeDPhase(v) {
-  if (!v) return "";
-  const k = String(v).toLowerCase().replace(/[^a-z0-9]/g, "");
-  return D_PHASE_KEYS.find(p => p.replace(/[^a-z0-9]/g, "") === k) || v;
-}
+/* SCAP D-Form phases — single-sourced with the frontend; the same file is
+ * loaded by the browser via a <script> tag. Legacy free-text values like
+ * "D4" or "d-5" normalize to canonical keys; unrecognized values are kept. */
+const { normalizeDPhase } = require("./public/js/d-phases.js");
 
 /* ── Store ───────────────────────────────────────────────────── */
 let projects = [];
@@ -181,6 +190,35 @@ const TRUST_EASY_AUTH = IS_AZURE || process.env.TRUST_MS_PRINCIPAL_HEADERS === "
 const STAFF_SESSION_MS = 7 * 24 * 3600e3;
 const GUEST_SESSION_MS = 30 * 24 * 3600e3;
 
+/* Behind Azure App Service (or any reverse proxy) trust the first proxy hop,
+ * so req.ip is the real client address from X-Forwarded-For (used by the
+ * rate limiter) and req.secure reflects the original HTTPS connection
+ * (used for the Secure cookie flag). */
+if (IS_AZURE || process.env.TRUST_PROXY === "1") app.set("trust proxy", 1);
+
+/* Sliding-window rate limiter for credential and invite-token endpoints,
+ * keyed per client IP per endpoint. In-memory is fine here: the server is a
+ * single process, and losing counters on restart is acceptable. */
+const rateBuckets = new Map();
+function rateLimited(bucket, req, max, windowMs) {
+  const key = bucket + "|" + (req.ip || req.socket.remoteAddress || "?");
+  const now = Date.now();
+  const hits = (rateBuckets.get(key) || []).filter(t => now - t < windowMs);
+  if (hits.length >= max) { rateBuckets.set(key, hits); return true; }
+  hits.push(now);
+  rateBuckets.set(key, hits);
+  return false;
+}
+function tooManyAttempts(res) {
+  res.status(429).json({ errors: ["Too many attempts — wait a few minutes and try again."] });
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, hits] of rateBuckets) {
+    if (!hits.length || now - hits[hits.length - 1] > 30 * 60e3) rateBuckets.delete(k);
+  }
+}, 10 * 60e3).unref();
+
 function hmac(s) { return crypto.createHmac("sha256", AUTH_SECRET).update(s).digest("base64url"); }
 function sha256(s) { return crypto.createHash("sha256").update(s).digest("hex"); }
 function makeSessionValue(payload) {
@@ -208,16 +246,28 @@ function getCookies(req) {
   });
   return out;
 }
-function setSession(res, payload) {
-  const maxAge = Math.max(0, Math.floor((payload.exp - Date.now()) / 1000));
-  res.setHeader("Set-Cookie",
-    `wssp_session=${makeSessionValue(payload)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`);
+/* Session cookie attributes; the Secure flag is added when the request came
+ * in over HTTPS (directly, or via a trusted proxy's X-Forwarded-Proto), so
+ * deployed cookies never travel over plain HTTP while local dev still works. */
+function cookieAttrs(req, maxAge) {
+  const secure = (req.secure || req.headers["x-forwarded-proto"] === "https") ? "; Secure" : "";
+  return `; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
 }
-function clearSession(res) {
-  res.setHeader("Set-Cookie", "wssp_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+function setSession(req, res, payload) {
+  const maxAge = Math.max(0, Math.floor((payload.exp - Date.now()) / 1000));
+  res.setHeader("Set-Cookie", `wssp_session=${makeSessionValue(payload)}` + cookieAttrs(req, maxAge));
+}
+function clearSession(req, res) {
+  res.setHeader("Set-Cookie", "wssp_session=" + cookieAttrs(req, 0));
 }
 
 /* ── Middleware ──────────────────────────────────────────────── */
+app.use((req, res, next) => {
+  // Never let browsers MIME-sniff responses (esp. downloaded uploads) into
+  // something executable.
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  next();
+});
 app.use(express.json({ limit: "2mb" }));
 app.use((req, res, next) => {
   req.user = null;
@@ -301,6 +351,7 @@ app.get("/api/me", (req, res) => {
 });
 
 app.post("/api/login", (req, res) => {
+  if (rateLimited("login", req, 10, 10 * 60e3)) return tooManyAttempts(res);
   const { name, email, code } = req.body || {};
   if (!code || String(code).trim() !== STAFF_CODE) {
     return res.status(401).json({ errors: ["Invalid staff access code"] });
@@ -313,12 +364,12 @@ app.post("/api/login", (req, res) => {
     via: "code",
     exp: Date.now() + STAFF_SESSION_MS
   };
-  setSession(res, payload);
+  setSession(req, res, payload);
   res.json({ ok: true });
 });
 
 app.post("/api/logout", (req, res) => {
-  clearSession(res);
+  clearSession(req, res);
   res.json({ ok: true });
 });
 
@@ -376,6 +427,16 @@ app.delete("/api/projects/:id/invites/:inviteId", (req, res) => {
   res.json(projectView(p, req));
 });
 
+/* Account-setup links that were never used to set a password expire after
+ * two weeks (reissuing starts a fresh window). Links already spent setting
+ * up an account stay recognized — they route to the sign-in prompt. */
+const INVITE_LINK_TTL_MS = 14 * 24 * 3600e3;
+function inviteLinkExpired(inv) {
+  if (inv.usedAt) return false;
+  const issued = Date.parse(inv.regeneratedAt || inv.createdAt || 0);
+  return !issued || Date.now() - issued > INVITE_LINK_TTL_MS;
+}
+
 /* Locate a live invite by its raw token. Returns {project, invite} or a
  * response-sending falsy result. */
 function findInviteByToken(res, token) {
@@ -388,6 +449,10 @@ function findInviteByToken(res, token) {
         res.status(410).json({ errors: ["This invite link has been revoked. Contact your PBK project contact for a new one."] });
         return null;
       }
+      if (inviteLinkExpired(inv)) {
+        res.status(410).json({ errors: ["This link has expired — account-setup links are valid for 14 days. Ask your PBK contact to reissue it (click your name in the project's Share panel)."] });
+        return null;
+      }
       return { project: p, invite: inv };
     }
   }
@@ -398,6 +463,7 @@ function findInviteByToken(res, token) {
 /* Step 1 of the invite flow: tells the frontend whether this link should
  * show account setup (first visit / password reset) or a sign-in prompt. */
 app.post("/api/invites/redeem", (req, res) => {
+  if (rateLimited("invite", req, 30, 10 * 60e3)) return tooManyAttempts(res);
   const found = findInviteByToken(res, String((req.body || {}).token || ""));
   if (!found) return;
   const { project, invite } = found;
@@ -413,6 +479,7 @@ app.post("/api/invites/redeem", (req, res) => {
 /* Step 2 (first visit or staff-reissued reset link): set the password.
  * Consumes the link — afterwards access is by email + password sign-in. */
 app.post("/api/invites/activate", (req, res) => {
+  if (rateLimited("invite", req, 30, 10 * 60e3)) return tooManyAttempts(res);
   const { token, password, name } = req.body || {};
   const found = findInviteByToken(res, String(token || ""));
   if (!found) return;
@@ -435,7 +502,7 @@ app.post("/api/invites/activate", (req, res) => {
   invite.usedAt = new Date().toISOString();
   invite.lastUsedAt = invite.usedAt;
   saveProjects();
-  setSession(res, {
+  setSession(req, res, {
     kind: "guest", email: invite.email, name: guests[invite.email].name || invite.email,
     exp: Date.now() + GUEST_SESSION_MS
   });
@@ -444,6 +511,7 @@ app.post("/api/invites/activate", (req, res) => {
 
 /* Collaborator sign-in with email + password (any device, any time). */
 app.post("/api/login/guest", (req, res) => {
+  if (rateLimited("login", req, 10, 10 * 60e3)) return tooManyAttempts(res);
   const email = String((req.body || {}).email || "").trim().toLowerCase();
   const password = String((req.body || {}).password || "");
   const acc = guests[email];
@@ -455,7 +523,7 @@ app.post("/api/login/guest", (req, res) => {
       !crypto.timingSafeEqual(Buffer.from(attempt), Buffer.from(acc.passwordHash))) {
     return res.status(401).json({ errors: ["Invalid email or password"] });
   }
-  setSession(res, {
+  setSession(req, res, {
     kind: "guest", email, name: acc.name || email,
     exp: Date.now() + GUEST_SESSION_MS
   });
@@ -776,6 +844,10 @@ app.delete("/api/projects/:id", (req, res) => {
 app.use((err, req, res, next) => {
   if (err && err.code === "LIMIT_FILE_SIZE") {
     return res.status(400).json({ errors: ["File is larger than the 25 MB limit"] });
+  }
+  if (err && err.code === "BAD_FILE_TYPE") {
+    return res.status(400).json({ errors: [
+      `File type ${err.ext || ""} isn't accepted — upload documents, spreadsheets, images, or drawings (PDF, Word, Excel, PowerPoint, images, ZIP, DWG/DXF, MSG/EML).`] });
   }
   console.error(err);
   res.status(500).json({ errors: ["Unexpected server error"] });
