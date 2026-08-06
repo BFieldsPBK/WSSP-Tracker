@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 17;
+const API_VERSION = 18;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {
@@ -173,6 +173,30 @@ function formatBytes(n) {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 const CLIP_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.4 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`;
+const LOCK_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
+
+/* Brief, self-dismissing notification for actions that don't re-render the
+ * whole view (e.g. "Revoked access for 3 collaborators"). Stacks in a fixed
+ * corner container; each toast fades out and removes itself. */
+function toast(message, kind = "success") {
+  let host = document.getElementById("toast-host");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "toast-host";
+    document.body.appendChild(host);
+  }
+  const el = document.createElement("div");
+  el.className = `toast toast-${kind}`;
+  el.setAttribute("role", "status");
+  el.textContent = message;
+  host.appendChild(el);
+  // Trigger the enter transition on the next frame.
+  requestAnimationFrame(() => el.classList.add("toast-in"));
+  setTimeout(() => {
+    el.classList.remove("toast-in");
+    setTimeout(() => el.remove(), 300);
+  }, 3500);
+}
 
 /* Per-project UI state, keyed "projectId|item" so it survives re-renders
  * without leaking between projects. Categories start collapsed. */
@@ -1519,6 +1543,13 @@ async function renderProject(id) {
   const goalPct = goal ? Math.min(100, (score.yes / goal) * 100) : 0;
   const maybePct = goal ? Math.min(100, ((score.yes + score.maybeYes) / goal) * 100) : 0;
 
+  // Number of distinct collaborators who currently hold access (staff only see
+  // the invite list). Access is derived from active, non-revoked invites, so
+  // this is what "Revoke All Access" will clear.
+  const guestCount = staff
+    ? new Set((project.invites || []).filter(inv => !inv.revoked).map(inv => inv.email)).size
+    : 0;
+
   view.innerHTML = `
     <div class="breadcrumbs">${staff ? `<a href="#/">Projects</a> / ` : ""}${esc(project.name)}</div>
     <div class="card project-head">
@@ -1532,6 +1563,11 @@ async function renderProject(id) {
           ${staff ? `
           <a class="btn btn-primary" href="#/project/${id}/report">Export Report</a>
           <button class="btn btn-secondary" id="share-project">${sharingOpen.has(id) ? "Close Sharing" : "Share"}</button>
+          <button class="btn btn-secondary btn-revoke-all" id="revoke-all-guests"
+            ${guestCount ? "" : "disabled"}
+            title="${guestCount ? `Revoke access for all ${guestCount} collaborator${guestCount > 1 ? "s" : ""}` : "No collaborators have access"}">
+            ${LOCK_SVG}<span>Revoke Access${guestCount ? ` (${guestCount})` : ""}</span>
+          </button>
           <a class="btn btn-secondary" href="#/project/${id}/edit">Edit Details</a>
           <button class="btn btn-quiet" id="delete-project" title="Delete project">Delete</button>` : ""}
         </div>
@@ -1727,6 +1763,27 @@ async function renderProject(id) {
   if (closeSharing) closeSharing.addEventListener("click", () => {
     sharingOpen.delete(id);
     renderProject(id);
+  });
+  const revokeAllBtn = document.getElementById("revoke-all-guests");
+  if (revokeAllBtn) revokeAllBtn.addEventListener("click", async () => {
+    if (!guestCount) return; // disabled — nothing to revoke
+    const noun = `${guestCount} guest${guestCount > 1 ? "s" : ""}`;
+    if (!confirm(
+      `Revoke access for all ${noun}? They will be immediately locked out of this project. ` +
+      `You can re-invite them later — their accounts and passwords are kept, and no project ` +
+      `data, credits, notes, or files are affected.`
+    )) return;
+    try {
+      const result = await api("DELETE", `/api/projects/${id}/guests`);
+      // Closing the Share panel avoids showing a now-stale invite list before
+      // the re-render; the re-render then reflects the cleared count.
+      sharingOpen.delete(id);
+      const n = result.revoked || 0;
+      toast(n
+        ? `Revoked access for ${n} collaborator${n > 1 ? "s" : ""}.`
+        : "No active access to revoke.");
+      renderProject(id);
+    } catch (e) { alert(e.message); }
   });
   const dismissFresh = document.getElementById("dismiss-fresh");
   if (dismissFresh) dismissFresh.addEventListener("click", () => {

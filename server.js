@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 17;
+const API_VERSION = 18;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -496,6 +496,37 @@ app.delete("/api/projects/:id/invites/:inviteId", (req, res) => {
   p.updatedAt = new Date().toISOString();
   saveProjects();
   res.json(projectView(p, req));
+});
+
+/* "Revoke all access": staff panic button that cuts every external
+ * collaborator off this project at once. A guest's access is derived live
+ * from the project's active (non-revoked) invites for their email
+ * (guestProjects/validGrants), so revoking every invite here immediately
+ * locks all of them out on their next request — no session cleanup needed.
+ *
+ * This deliberately does NOT delete guest accounts from guests.json: those
+ * records are shared across every project a collaborator was invited to, and
+ * an account may still hold access to other projects. Removing the account
+ * would break those unrelated grants and can't be scoped "per project"
+ * (guests.json has no projectId). Revoking this project's invites is the
+ * correct, project-scoped, reversible action — staff can re-invite anyone
+ * later, and their existing account/password still works. The count returned
+ * is the number of distinct collaborators who held access. */
+app.delete("/api/projects/:id/guests", (req, res) => {
+  if (!requireStaff(req, res)) return;
+  const p = findProject(req, res);
+  if (!p) return;
+  const activeEmails = new Set((p.invites || []).filter(i => !i.revoked).map(i => i.email));
+  const revoked = activeEmails.size;
+  let changed = false;
+  for (const inv of p.invites || []) {
+    if (!inv.revoked) { inv.revoked = true; changed = true; }
+  }
+  if (changed) {
+    p.updatedAt = new Date().toISOString();
+    saveProjects();
+  }
+  res.json({ revoked });
 });
 
 /* Account-setup links that were never used to set a password expire after

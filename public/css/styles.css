@@ -265,6 +265,44 @@ h1 {
 .btn-quiet { background: none; color: var(--pbk-muted); padding: 9px 10px; }
 .btn-quiet:hover { color: var(--pbk-red); }
 
+/* "Revoke Access" — a secondary button that leans destructive on hover.
+ * Compact (matches Share/Edit Details weight) with a lock glyph. */
+.btn-revoke-all { gap: 6px; }
+.btn-revoke-all svg { flex: none; }
+.btn-revoke-all:hover:not(:disabled) { border-color: var(--pbk-red); color: var(--pbk-red); }
+.btn:disabled,
+.btn[disabled] { opacity: .5; cursor: not-allowed; }
+.btn-revoke-all:disabled:hover { border-color: var(--pbk-border); color: var(--pbk-ink); }
+
+/* ── Toast notifications ───────────────────────────────────────── */
+#toast-host {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 1000;
+  pointer-events: none;
+}
+.toast {
+  min-width: 220px;
+  max-width: 360px;
+  padding: 12px 16px;
+  border-radius: var(--pbk-radius-sm);
+  background: var(--pbk-ink);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: var(--pbk-shadow-hover);
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity .25s ease, transform .25s ease;
+}
+.toast.toast-in { opacity: 1; transform: translateY(0); }
+.toast-success { background: #2f7d4f; }
+.toast-error { background: var(--pbk-red); }
+
 /* ── Cards / project list ──────────────────────────────────────── */
 .card {
   background: var(--pbk-card);
