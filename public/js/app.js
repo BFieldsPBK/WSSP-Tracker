@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 15;
+const API_VERSION = 16;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {

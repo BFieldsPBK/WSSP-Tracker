@@ -110,7 +110,7 @@ already-activated accounts are unaffected). Credit uploads accept
 documents, spreadsheets, images, and drawings only (PDF, Word, Excel,
 PowerPoint, images, ZIP, DWG/DXF, MSG/EML — never executables or web
 pages); each upload's contents are also checked against its extension's
-magic bytes, and each project is capped at 300 files / 750 MB of evidence.
+magic bytes, and each project is capped at 300 files / 25 GB of evidence.
 
 ## Running it
 

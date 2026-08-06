@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 15;
+const API_VERSION = 16;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -26,7 +26,7 @@ const MAX_UPLOAD = 100 * 1024 * 1024; // 100 MB per file (large PDFs, plan sets)
 // Per-project upload caps: bound total storage a single project can consume
 // so one project can't fill the disk (DoS) or amass unbounded evidence.
 const MAX_FILES_PER_PROJECT = 300;
-const MAX_PROJECT_BYTES = 750 * 1024 * 1024; // 750 MB of evidence per project
+const MAX_PROJECT_BYTES = 25 * 1024 * 1024 * 1024; // 25 GB of evidence per project
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(FILES_DIR)) fs.mkdirSync(FILES_DIR, { recursive: true });
@@ -898,7 +898,7 @@ app.post("/api/projects/:id/credits/:creditId/files", upload.single("file"), (re
   if (totalBytes + req.file.size > MAX_PROJECT_BYTES) {
     discard();
     return res.status(400).json({ errors: [
-      `This upload would exceed the project's ${Math.round(MAX_PROJECT_BYTES / 1024 / 1024)} MB evidence limit. Remove some files first.`] });
+      `This upload would exceed the project's ${Math.round(MAX_PROJECT_BYTES / (1024 * 1024 * 1024))} GB evidence limit. Remove some files first.`] });
   }
   if (!p.documents) p.documents = {};
   const list = p.documents[req.params.creditId] || (p.documents[req.params.creditId] = []);
