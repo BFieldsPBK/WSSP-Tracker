@@ -104,12 +104,13 @@ Sessions are HMAC-signed cookies (secret in `data/auth-secret`, marked
 `Secure` when served over HTTPS); invite tokens are stored hashed; guest
 passwords are scrypt-hashed in `data/guests.json`. Sign-in and
 invite-link endpoints are rate-limited per client address, and
-account-setup links that were never used expire after **14 days**
+account-setup links that were never used expire after **7 days**
 (reissuing by clicking the invitee's name starts a fresh window —
 already-activated accounts are unaffected). Credit uploads accept
 documents, spreadsheets, images, and drawings only (PDF, Word, Excel,
 PowerPoint, images, ZIP, DWG/DXF, MSG/EML — never executables or web
-pages).
+pages); each upload's contents are also checked against its extension's
+magic bytes, and each project is capped at 300 files / 750 MB of evidence.
 
 ## Running it
 
@@ -124,6 +125,37 @@ Then open `http://localhost:3000`. Set `PORT` to use a different port, and
 `APPDATA_DIR` to store project data somewhere other than the app's own
 `data/` folder (which is git-ignored — the repository holds only code and
 protocol definitions, never project data).
+
+### Tests
+
+Pure scoring logic (point-spec parsing, `computeScore`, and the
+achievable-maximum computation) lives in `public/js/point-spec.js` and
+`public/js/scoring.js` — the same modules the browser loads — so it can be
+unit-tested under Node with no build step:
+
+```
+npm test
+```
+
+## Deployment & operational notes
+
+- **Run a single instance.** Projects, guests, and the session/auth secret
+  live in the process and in flat files under `data/`. Running more than one
+  instance (App Service scale-out, or overlapped restarts/slot swaps) would
+  let instances overwrite each other's `projects.json` (lost updates) and
+  mint session cookies the other instance rejects. Keep the app pinned to a
+  single always-on instance (disable scale-out). Moving projects/guests to a
+  shared datastore and the auth secret + staff code to a shared secret
+  (App Setting / Key Vault) is a prerequisite for any future scale-out.
+- **Proxy trust must match the topology.** The per-IP rate limiter reads
+  `req.ip` from `X-Forwarded-For`, which is only trusted when running on
+  Azure or with `TRUST_PROXY=1`. Set `TRUST_PROXY=1` **only** when the app
+  actually sits behind a trusted reverse proxy: enabling it with no proxy
+  lets clients spoof their address, and leaving it off behind a proxy
+  collapses every client into one shared rate-limit bucket.
+- **Secrets are written owner-only (0600).** `data/auth-secret`,
+  `data/staff-access-code`, and `data/guests.json` are created with `0600`
+  permissions; keep the `data/` directory off shared/world-readable storage.
 
 ## Reference documents
 
