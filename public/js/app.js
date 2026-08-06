@@ -107,33 +107,10 @@ function interpretationsFor(protocolId, creditId) {
   });
 }
 
-/* Point spec strings: "R", "1", "1-2", "R-1", "2-7", "35", "1, 2-3", "1 + 2-3".
- * required = leading R; header = null spec. `allowed` is the exact list of
- * claimable point values (mirrors parsePointSpec in server.js):
- *   "2-7" -> 2..7 · "1, 2-3" -> 1,2,3 · "R-3" -> tiers 1..3 · "1 + 2-3" -> 1..4 */
-function parsePoints(spec) {
-  if (spec === null || spec === undefined) return { header: true, required: false, max: 0, allowed: [] };
-  const required = /^R/i.test(spec);
-  const body = spec.replace(/^R[-–]?\s*/i, "");
-  let allowed = [];
-  if (body.includes("+")) {
-    const partMax = s => Math.max(0, ...(s.match(/\d+/g) || []).map(Number));
-    const total = body.split("+").reduce((t, x) => t + partMax(x), 0);
-    for (let n = 1; n <= total; n++) allowed.push(n);
-  } else if (required && /^\d+$/.test(body.trim())) {
-    for (let n = 1; n <= Number(body.trim()); n++) allowed.push(n);
-  } else {
-    for (const part of body.split(",")) {
-      const m = part.match(/(\d+)\s*[-–]\s*(\d+)/);
-      if (m) { for (let n = Number(m[1]); n <= Number(m[2]); n++) allowed.push(n); }
-      else { const s = part.match(/\d+/); if (s) allowed.push(Number(s[0])); }
-    }
-  }
-  allowed = [...new Set(allowed)].sort((a, b) => a - b);
-  const max = allowed.length ? allowed[allowed.length - 1] : 0;
-  const min = allowed.length ? allowed[0] : 0;
-  return { header: false, required, max, min, allowed, label: spec };
-}
+/* parsePoints(), threshold(), eachCredit(), entryPoints(), computeScore(),
+ * and achievablePoints() are defined in /js/scoring.js (loaded before this
+ * file) — pure, DOM-free scoring logic kept separate so it can be unit-tested
+ * under Node. They're available here as globals. */
 
 const PROJECT_TYPE_NAMES = {
   new: "New School (Facility)",
@@ -175,137 +152,11 @@ function dPhaseOptions(current) {
     (cur && !known ? `<option value="${esc(cur)}" selected>${esc(current)} (legacy)</option>` : "");
 }
 
-function threshold(protocol, project) {
-  const t = protocol.thresholds[project.projectType];
-  return t ? t[project.districtClass] : null;
-}
-
-/* Walk every scoreable credit of a protocol. */
-function eachCredit(protocol, fn) {
-  for (const cat of protocol.categories)
-    for (const g of cat.groups)
-      for (const [id, name, spec] of g.credits) {
-        const pts = parsePoints(spec);
-        if (!pts.header) fn({ id, name, pts, category: cat });
-      }
-}
-
 /* The four scorecard statuses, in display order. "maybeYes" and "maybeNo"
  * both mean undecided; maybeYes counts toward potential points. */
 const STATUSES = ["yes", "maybeYes", "maybeNo", "no"];
 const STATUS_LABELS = { yes: "Yes", maybeYes: "Maybe Yes", maybeNo: "Maybe No", no: "No" };
 const STATUS_COLORS = { yes: "#31493c", maybeYes: "#748b58", maybeNo: "#d9bd5f", no: "#9aa4ad", rest: "#eef2f5" };
-
-/* Points actually claimed for one credit entry (yes / maybeYes earn).
- * For R-n credits (a requirement plus optional points), Yes means the
- * requirement is satisfied — points above the requirement are opt-in. */
-function entryPoints(entry, pts) {
-  if (!entry || entry.status === "no" || entry.status === "maybeNo") return 0;
-  if (pts.max === 0) return 0;
-  if (entry.points !== undefined) return entry.points;
-  if (pts.required) return 0;
-  return pts.allowed.length === 1 ? pts.allowed[0] : 0;
-}
-
-function computeScore(protocol, project) {
-  const blank = () => ({
-    yes: 0, maybeYes: 0,                    // claimed points
-    maybeNoMax: 0, noMax: 0,                // possible points in leaning-no / no credits
-    nYes: 0, nMaybeYes: 0, nMaybeNo: 0, nNo: 0, nNA: 0,
-    reqTotal: 0, reqMet: 0
-  });
-  const s = { ...blank(), byCategory: {} };
-  const exemptions = project.exemptions || {};
-  const notApplicable = project.notApplicable || {};
-  eachCredit(protocol, ({ id, pts, category }) => {
-    const c = s.byCategory[category.id] || (s.byCategory[category.id] = blank());
-    if (notApplicable[id]) { s.nNA++; c.nNA++; return; }   // out of scope per Table 1
-    const entry = project.credits[id];
-    if (pts.required) {
-      s.reqTotal++; c.reqTotal++;
-      // an OSPI exemption (E / V / EX) deems a required credit compliant
-      if ((entry && entry.status === "yes") || exemptions[id]) { s.reqMet++; c.reqMet++; }
-    }
-    const p = entryPoints(entry, pts);
-    if (!entry) return;
-    if (entry.status === "yes")      { s.yes += p;      c.yes += p;      s.nYes++;      c.nYes++; }
-    if (entry.status === "maybeYes") { s.maybeYes += p; c.maybeYes += p; s.nMaybeYes++; c.nMaybeYes++; }
-    if (entry.status === "maybeNo")  { s.maybeNoMax += pts.max; c.maybeNoMax += pts.max; s.nMaybeNo++; c.nMaybeNo++; }
-    if (entry.status === "no")       { s.noMax += pts.max;      c.noMax += pts.max;      s.nNo++;      c.nNo++; }
-  });
-  return s;
-}
-
-/* Achievable maximum points, per category and overall, for one project.
- *
- * The official scorecard totals sum every credit's maximum, but that
- * overcounts: alternate pathways (exclusiveSets — E1.1/E1.2/E1.3) allow only
- * one choice, and the handbook bars some combinations outright
- * (conflictSets — "Points in E3.1.1–E3.1.3 may not be combined with points
- * in E1.3"). The real ceiling is the best valid combination.
- *
- * Only a handful of credits carry constraints, so we brute-force every
- * subset of the constrained credits in a category, keep the valid ones, and
- * take the highest-scoring — honoring the project's own commitments (a
- * pathway already marked Yes / Maybe Yes locks the choice) and skipping
- * Table 1 N/A credits. Results never exceed the official category total
- * (where OSPI prints a lower number, OSPI wins). */
-function achievablePoints(protocol, project) {
-  const notApplicable = (project && project.notApplicable) || {};
-  const committed = id => {
-    const st = project && project.credits && project.credits[id]?.status;
-    return st === "yes" || st === "maybeYes";
-  };
-  const conflicts = {};
-  for (const [a, list] of protocol.conflictSets || [])
-    for (const b of list) {
-      (conflicts[a] || (conflicts[a] = new Set())).add(b);
-      (conflicts[b] || (conflicts[b] = new Set())).add(a);
-    }
-  const exclusiveOf = {};
-  (protocol.exclusiveSets || []).forEach((set, i) => set.forEach(c => { exclusiveOf[c] = i; }));
-  const isConstrained = id => conflicts[id] !== undefined || exclusiveOf[id] !== undefined;
-
-  const out = { total: 0, listedTotal: 0, byCategory: {} };
-  for (const cat of protocol.categories) {
-    let base = 0;       // unconstrained credits always count their maximum
-    const cons = [];    // constrained credits in this category
-    for (const g of cat.groups) for (const [cid, , spec] of g.credits) {
-      const pts = parsePoints(spec);
-      if (pts.header || notApplicable[cid]) continue;
-      if (isConstrained(cid)) cons.push({ id: cid, max: pts.max });
-      else base += pts.max;
-    }
-    let bestAny = 0, bestCommitted = -1;
-    for (let m = 0; m < (1 << cons.length); m++) {
-      const ids = cons.filter((_, i) => m & (1 << i)).map(c => c.id);
-      const sum = cons.reduce((t, c, i) => t + ((m & (1 << i)) ? c.max : 0), 0);
-      let ok = true;
-      const usedSet = {};
-      for (const cid of ids) {
-        const si = exclusiveOf[cid];
-        if (si !== undefined) {
-          if (usedSet[si]) { ok = false; break; }
-          usedSet[si] = true;
-        }
-        if (conflicts[cid] && ids.some(o => conflicts[cid].has(o))) { ok = false; break; }
-      }
-      if (!ok) continue;
-      bestAny = Math.max(bestAny, sum);
-      if (cons.every((c, i) => !committed(c.id) || (m & (1 << i)))) {
-        bestCommitted = Math.max(bestCommitted, sum);
-      }
-    }
-    // If stored data holds an (older, now-invalid) combination, fall back to
-    // the unrestricted best rather than showing nothing sensible.
-    const best = bestCommitted >= 0 ? bestCommitted : bestAny;
-    const capped = cat.total !== undefined ? Math.min(base + best, cat.total) : base + best;
-    out.byCategory[cat.id] = capped;
-    out.total += capped;
-    out.listedTotal += cat.total ?? base + best;
-  }
-  return out;
-}
 
 /* ── Rendering helpers ───────────────────────────────────────── */
 const view = document.getElementById("view");
@@ -895,7 +746,10 @@ function arcPath(cx, cy, r, a0, a1) {
  * segment's value labeled just outside its midpoint. */
 function gaugeSvg({ size = 190, stroke = 26, domain, segments, centerTop, centerBottom, marker }) {
   const cx = size / 2, cy = size / 2, r = (size - stroke) / 2 - 14;
-  const toAngle = v => GAUGE_START + GAUGE_SWEEP * Math.max(0, Math.min(1, v / domain));
+  // Clamp the domain to at least 1 so a category whose achievable total is 0
+  // (only required, zero-point credits) never divides by zero -> NaN coords.
+  const dom = domain > 0 ? domain : 1;
+  const toAngle = v => GAUGE_START + GAUGE_SWEEP * Math.max(0, Math.min(1, v / dom));
   let acc = 0;
   const parts = [`<path d="${arcPath(cx, cy, r, GAUGE_START, GAUGE_START + GAUGE_SWEEP)}"
     stroke="${STATUS_COLORS.rest}" stroke-width="${stroke}" fill="none" stroke-linecap="round"/>`];
@@ -1080,19 +934,30 @@ async function renderReport(id) {
 
   const goal = threshold(protocol, project);
   const score = computeScore(protocol, project);
-  const compliant = score.reqMet === score.reqTotal && score.yes >= goal;
+  // Guard against a missing threshold: `score.yes >= null` coerces to `>= 0`
+  // (always true), which would wrongly label a project compliant with zero
+  // required points. Require an explicit numeric goal.
+  const compliant = goal != null && score.reqMet === score.reqTotal && score.yes >= goal;
   const addressLine = [project.address, project.city, project.state, project.zip].filter(Boolean).join(", ");
   const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
   /* OSPI final submittals accept only Yes or No — collect unresolved Maybes,
    * required credits marked No without an exemption, and unmarked credits. */
-  const maybes = [], reqNoList = [], unmarked = [];
+  const maybes = [], reqNoList = [], unmarked = [], pointsMissing = [];
   eachCredit(protocol, ({ id: cid, pts }) => {
     if ((project.notApplicable || {})[cid]) return;
     const e = project.credits[cid];
     if (!e) { unmarked.push(cid); return; }
     if (e.status === "maybeYes" || e.status === "maybeNo") maybes.push(cid);
     if (pts.required && e.status === "no" && !(project.exemptions || {})[cid]) reqNoList.push(cid);
+    // Variable-range credit (e.g. "2-7") claimed Yes/Maybe Yes but with no
+    // point value chosen counts as 0 points while the scorecard shows "✓" —
+    // the scorecard reads complete yet silently under-counts. R-n credits are
+    // excluded (their Yes means "requirement met"; extra points are opt-in).
+    if ((e.status === "yes" || e.status === "maybeYes") &&
+        !pts.required && pts.allowed.length > 1 && e.points === undefined) {
+      pointsMissing.push(cid);
+    }
   });
   const isDraft = maybes.length > 0;
   const isBlocked = reqNoList.length > 0;
@@ -1200,6 +1065,15 @@ async function renderReport(id) {
       The final scorecard should answer every credit — unpursued credits are a No.</span>
       <button class="btn btn-secondary" id="fill-unmarked-no">Mark All Unmarked as No</button>
     </div>` : ""}
+    ${pointsMissing.length ? `
+    <div class="no-print maybe-warning">
+      <div>
+        <b>${pointsMissing.length} range credit${pointsMissing.length > 1 ? "s are" : " is"} marked Yes without a point value.</b>
+        These show a ✓ but score <b>0 points</b> — choose how many points each claims on the scorecard so the total isn't under-counted:
+        <span class="maybe-list">${pointsMissing.map(esc).join(", ")}</span>
+      </div>
+      <a class="btn btn-secondary" href="#/project/${id}">Set Points</a>
+    </div>` : ""}
     <div class="no-print note-box" style="margin:0 0 18px;">
       Use your browser's print dialog to save as PDF. Enable <b>"Background graphics"</b> so shading prints.
     </div>
@@ -1306,6 +1180,10 @@ async function renderReport(id) {
 
 /* ── Project page (overview + scorecard) ─────────────────────── */
 async function renderProject(id) {
+  // loadReference() is awaited for its side effect: it populates the module
+  // REFERENCE cache that excerptFor()/interpretationsFor() read below. Its
+  // return value is intentionally not destructured (hence three promises, two
+  // bindings).
   const [project, protocols] = await Promise.all([api("GET", `/api/projects/${id}`), loadProtocols(), loadReference()]);
   const protocol = protocols[project.protocolId];
   if (!protocol) throw new Error(`Unknown protocol: ${project.protocolId}`);

@@ -23,6 +23,10 @@ const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
 const FILES_DIR = path.join(DATA_DIR, "files");
 const PROTOCOL_DIR = path.join(__dirname, "config", "protocols");
 const MAX_UPLOAD = 25 * 1024 * 1024; // 25 MB per file, matching PBK's other tools
+// Per-project upload caps: bound total storage a single project can consume
+// so one project can't fill the disk (DoS) or amass unbounded evidence.
+const MAX_FILES_PER_PROJECT = 300;
+const MAX_PROJECT_BYTES = 750 * 1024 * 1024; // 750 MB of evidence per project
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(FILES_DIR)) fs.mkdirSync(FILES_DIR, { recursive: true });
@@ -50,10 +54,60 @@ const upload = multer({
 });
 
 // Atomic write: temp file + rename, so a crash mid-write can't corrupt data.
-function writeFileAtomic(file, data) {
+// `mode` (e.g. 0o600 for secrets) is applied to the temp file before rename,
+// so the final file is never briefly world-readable.
+function writeFileAtomic(file, data, mode) {
   const tmp = file + ".tmp-" + process.pid;
-  fs.writeFileSync(tmp, data, "utf8");
+  fs.writeFileSync(tmp, data, mode ? { encoding: "utf8", mode } : "utf8");
+  if (mode) { try { fs.chmodSync(tmp, mode); } catch (e) { /* best effort on non-POSIX */ } }
   fs.renameSync(tmp, file);
+}
+// Secrets and credentials are owner-only (0600); losing them to another
+// local account would be a session-forgery / password-hash disclosure risk.
+const SECRET_MODE = 0o600;
+
+/* Content sniffing for uploads. The extension allowlist (below) is the first
+ * gate; this is the second: read the leading bytes of the stored file and
+ * confirm they match a known signature for the claimed extension, so a
+ * script/executable renamed to .pdf/.png can't slip through. Container-only
+ * or text-ish formats (txt, csv, rtf, dwg, dxf, msg, eml) have no reliable
+ * magic number and are accepted on extension alone (they're already
+ * downloaded as attachments with X-Content-Type-Options: nosniff, so they
+ * never execute inline). Returns true when the type is acceptable. */
+function magicMatches(ext, buf) {
+  const startsWith = (...bytes) => bytes.every((b, i) => buf[i] === b);
+  const at = (off, ...bytes) => bytes.every((b, i) => buf[off + i] === b);
+  switch (ext) {
+    case ".pdf": return startsWith(0x25, 0x50, 0x44, 0x46);                 // %PDF
+    case ".png": return startsWith(0x89, 0x50, 0x4e, 0x47);                 // ‰PNG
+    case ".jpg": case ".jpeg": return startsWith(0xff, 0xd8, 0xff);         // JPEG SOI
+    case ".gif": return startsWith(0x47, 0x49, 0x46, 0x38);                 // GIF8
+    case ".webp": return startsWith(0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50); // RIFF....WEBP
+    case ".tif": case ".tiff":
+      return startsWith(0x49, 0x49, 0x2a, 0x00) || startsWith(0x4d, 0x4d, 0x00, 0x2a); // II*/MM
+    case ".heic": return at(4, 0x66, 0x74, 0x79, 0x70);                     // ....ftyp box
+    // Zip container and OOXML (docx/xlsx/pptx) are all ZIP archives.
+    case ".zip": case ".docx": case ".xlsx": case ".pptx":
+      return startsWith(0x50, 0x4b, 0x03, 0x04) || startsWith(0x50, 0x4b, 0x05, 0x06) || startsWith(0x50, 0x4b, 0x07, 0x08);
+    // Legacy Office (doc/xls/ppt) and Outlook .msg are OLE compound files.
+    case ".doc": case ".xls": case ".ppt":
+      return startsWith(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1);
+    // No reliable signature — trust the extension gate.
+    default: return true;
+  }
+}
+function contentTypeOk(storedPath, ext) {
+  let fd;
+  try {
+    fd = fs.openSync(storedPath, "r");
+    const buf = Buffer.alloc(16);
+    fs.readSync(fd, buf, 0, 16, 0);
+    return magicMatches(ext, buf);
+  } catch (e) {
+    return false;
+  } finally {
+    if (fd !== undefined) try { fs.closeSync(fd); } catch (e) { /* ignore */ }
+  }
 }
 
 /* ── Protocols & reference material (read-only config) ───────── */
@@ -79,27 +133,10 @@ const interpretations = JSON.parse(
 
 /* Per-protocol credit metadata for server-side validation: which point
  * values each credit can legally claim, required flags, and exclusive
- * alternate-pathway sets. Mirrors parsePoints in public/js/app.js. */
-function parsePointSpec(spec) {
-  const required = /^R/i.test(spec);
-  const body = spec.replace(/^R[-–]?\s*/i, "");
-  let allowed = [];
-  if (body.includes("+")) {
-    const partMax = s => Math.max(0, ...(s.match(/\d+/g) || []).map(Number));
-    const total = body.split("+").reduce((t, x) => t + partMax(x), 0);
-    for (let n = 1; n <= total; n++) allowed.push(n);
-  } else if (required && /^\d+$/.test(body.trim())) {
-    for (let n = 1; n <= Number(body.trim()); n++) allowed.push(n);   // "R-3" -> tiers 1..3
-  } else {
-    for (const part of body.split(",")) {
-      const m = part.match(/(\d+)\s*[-–]\s*(\d+)/);
-      if (m) { for (let n = Number(m[1]); n <= Number(m[2]); n++) allowed.push(n); }
-      else { const s = part.match(/\d+/); if (s) allowed.push(Number(s[0])); }
-    }
-  }
-  allowed = [...new Set(allowed)].sort((a, b) => a - b);
-  return { required, allowed };
-}
+ * alternate-pathway sets. The point-spec parser is single-sourced in
+ * public/js/point-spec.js — the same file the browser loads via a <script>
+ * tag — so client and server can never drift (as with d-phases.js). */
+const { parsePointSpec } = require("./public/js/point-spec.js");
 const creditMeta = {};
 for (const p of Object.values(protocols)) {
   const meta = creditMeta[p.id] = {};
@@ -164,7 +201,8 @@ if (fs.existsSync(GUESTS_FILE)) {
   guests = JSON.parse(fs.readFileSync(GUESTS_FILE, "utf8"));
 }
 function saveGuests() {
-  writeFileAtomic(GUESTS_FILE, JSON.stringify(guests, null, 2));
+  // guests.json holds scrypt password hashes + salts — keep it owner-only.
+  writeFileAtomic(GUESTS_FILE, JSON.stringify(guests, null, 2), SECRET_MODE);
 }
 function hashPassword(password, salt) {
   return crypto.scryptSync(password, salt, 64).toString("hex");
@@ -187,13 +225,25 @@ function hashPassword(password, salt) {
 const SECRET_FILE = path.join(DATA_DIR, "auth-secret");
 let AUTH_SECRET;
 if (fs.existsSync(SECRET_FILE)) AUTH_SECRET = fs.readFileSync(SECRET_FILE, "utf8").trim();
-else { AUTH_SECRET = crypto.randomBytes(32).toString("hex"); writeFileAtomic(SECRET_FILE, AUTH_SECRET); }
+else { AUTH_SECRET = crypto.randomBytes(32).toString("hex"); writeFileAtomic(SECRET_FILE, AUTH_SECRET, SECRET_MODE); }
 
 const STAFF_CODE_FILE = path.join(DATA_DIR, "staff-access-code");
 let STAFF_CODE = (process.env.STAFF_ACCESS_CODE || "").trim();
 if (!STAFF_CODE) {
   if (fs.existsSync(STAFF_CODE_FILE)) STAFF_CODE = fs.readFileSync(STAFF_CODE_FILE, "utf8").trim();
-  if (!STAFF_CODE) { STAFF_CODE = crypto.randomBytes(4).toString("hex"); writeFileAtomic(STAFF_CODE_FILE, STAFF_CODE); }
+  // 12 random bytes (96 bits / 24 hex chars): brute-force-proof even without
+  // the rate limiter. Prefer Microsoft SSO where deployed; this shared code
+  // is the dev/office fallback.
+  if (!STAFF_CODE) { STAFF_CODE = crypto.randomBytes(12).toString("hex"); writeFileAtomic(STAFF_CODE_FILE, STAFF_CODE, SECRET_MODE); }
+}
+/* Constant-time compare of the submitted staff code against the configured
+ * one, so a response-timing side channel can't reveal it character by
+ * character (matches the guest-password / session-signature paths). Lengths
+ * are compared first because timingSafeEqual throws on a length mismatch. */
+function staffCodeMatches(submitted) {
+  const a = Buffer.from(String(submitted).trim());
+  const b = Buffer.from(STAFF_CODE);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 const IS_AZURE = !!process.env.WEBSITE_SITE_NAME;
@@ -364,7 +414,7 @@ app.get("/api/me", (req, res) => {
 app.post("/api/login", (req, res) => {
   if (rateLimited("login", req, 10, 10 * 60e3)) return tooManyAttempts(res);
   const { name, email, code } = req.body || {};
-  if (!code || String(code).trim() !== STAFF_CODE) {
+  if (!code || !staffCodeMatches(code)) {
     return res.status(401).json({ errors: ["Invalid staff access code"] });
   }
   if (!name || !String(name).trim()) return res.status(400).json({ errors: ["Your name is required"] });
@@ -439,9 +489,13 @@ app.delete("/api/projects/:id/invites/:inviteId", (req, res) => {
 });
 
 /* Account-setup links that were never used to set a password expire after
- * two weeks (reissuing starts a fresh window). Links already spent setting
- * up an account stay recognized — they route to the sign-in prompt. */
-const INVITE_LINK_TTL_MS = 14 * 24 * 3600e3;
+ * one week (reissuing starts a fresh window). A shorter window limits the
+ * account-takeover exposure of a setup link that leaks via access logs,
+ * email link-scanners, or referrer headers before the invitee uses it.
+ * Links already spent setting up an account stay recognized — they route to
+ * the sign-in prompt. */
+const INVITE_LINK_TTL_MS = 7 * 24 * 3600e3;
+const INVITE_LINK_TTL_DAYS = Math.round(INVITE_LINK_TTL_MS / (24 * 3600e3));
 function inviteLinkExpired(inv) {
   if (inv.usedAt) return false;
   const issued = Date.parse(inv.regeneratedAt || inv.createdAt || 0);
@@ -461,7 +515,7 @@ function findInviteByToken(res, token) {
         return null;
       }
       if (inviteLinkExpired(inv)) {
-        res.status(410).json({ errors: ["This link has expired — account-setup links are valid for 14 days. Ask your PBK contact to reissue it (click your name in the project's Share panel)."] });
+        res.status(410).json({ errors: [`This link has expired — account-setup links are valid for ${INVITE_LINK_TTL_DAYS} days. Ask your PBK contact to reissue it (click your name in the project's Share panel).`] });
         return null;
       }
       return { project: p, invite: inv };
@@ -783,7 +837,14 @@ app.put("/api/projects/:id/credits/:creditId/note", (req, res) => {
   if (!requireAccess(req, res, req.params.id)) return;
   const p = findProject(req, res);
   if (!p) return;
-  const text = req.body && typeof req.body.text === "string" ? req.body.text.trim() : "";
+  let text = req.body && typeof req.body.text === "string" ? req.body.text.trim() : "";
+  // Cap note length so many credits × long notes can't grow one project
+  // document without bound (the JSON body limit is a per-request guard, not a
+  // cumulative one).
+  const MAX_NOTE_LEN = 5000;
+  if (text.length > MAX_NOTE_LEN) {
+    return res.status(400).json({ errors: [`Note is too long (max ${MAX_NOTE_LEN} characters)`] });
+  }
   if (!p.creditNotes) p.creditNotes = {};
   if (text) p.creditNotes[req.params.creditId] = text;
   else delete p.creditNotes[req.params.creditId];
@@ -807,6 +868,28 @@ app.post("/api/projects/:id/credits/:creditId/files", upload.single("file"), (re
   const p = findProject(req, res);
   if (!p) return;
   if (!req.file) return res.status(400).json({ errors: ["No file received"] });
+  const stored = path.join(FILES_DIR, req.file.filename);
+  const discard = () => { try { fs.unlinkSync(stored); } catch (e) { /* already gone */ } };
+  // Second gate: the bytes must actually match the claimed extension.
+  const ext = path.extname(req.file.originalname || "").toLowerCase();
+  if (!contentTypeOk(stored, ext)) {
+    discard();
+    return res.status(400).json({ errors: [
+      `This file's contents don't match its ${ext || "extension"} type — it may be corrupt or renamed. Upload the original document.`] });
+  }
+  // Per-project storage caps.
+  const existing = allDocuments(p);
+  if (existing.length >= MAX_FILES_PER_PROJECT) {
+    discard();
+    return res.status(400).json({ errors: [
+      `This project already has the maximum of ${MAX_FILES_PER_PROJECT} files. Remove some before adding more.`] });
+  }
+  const totalBytes = existing.reduce((t, d) => t + (d.size || 0), 0);
+  if (totalBytes + req.file.size > MAX_PROJECT_BYTES) {
+    discard();
+    return res.status(400).json({ errors: [
+      `This upload would exceed the project's ${Math.round(MAX_PROJECT_BYTES / 1024 / 1024)} MB evidence limit. Remove some files first.`] });
+  }
   if (!p.documents) p.documents = {};
   const list = p.documents[req.params.creditId] || (p.documents[req.params.creditId] = []);
   list.push({
