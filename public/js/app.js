@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 14;
+const API_VERSION = 15;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {
@@ -1317,7 +1317,7 @@ async function renderProject(id) {
               </div>`).join("")
             : `<div class="doc-empty">No supporting documentation yet.</div>`}
             <label class="upload-label">
-              + Upload document <span class="doc-meta">(max 25 MB)</span>
+              + Upload document <span class="doc-meta">(max 100 MB)</span>
               <input type="file" class="doc-upload" data-credit="${cid}" hidden
                 accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.txt,.rtf,.png,.jpg,.jpeg,.gif,.webp,.heic,.tif,.tiff,.zip,.dwg,.dxf,.msg,.eml">
             </label>

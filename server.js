@@ -16,13 +16,13 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 14;
+const API_VERSION = 15;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
 const FILES_DIR = path.join(DATA_DIR, "files");
 const PROTOCOL_DIR = path.join(__dirname, "config", "protocols");
-const MAX_UPLOAD = 25 * 1024 * 1024; // 25 MB per file, matching PBK's other tools
+const MAX_UPLOAD = 100 * 1024 * 1024; // 100 MB per file (large PDFs, plan sets)
 // Per-project upload caps: bound total storage a single project can consume
 // so one project can't fill the disk (DoS) or amass unbounded evidence.
 const MAX_FILES_PER_PROJECT = 300;
@@ -956,7 +956,7 @@ app.delete("/api/projects/:id", (req, res) => {
 /* Multer errors (e.g. oversize uploads) arrive as thrown errors. */
 app.use((err, req, res, next) => {
   if (err && err.code === "LIMIT_FILE_SIZE") {
-    return res.status(400).json({ errors: ["File is larger than the 25 MB limit"] });
+    return res.status(400).json({ errors: ["File is larger than the 100 MB limit"] });
   }
   if (err && err.code === "BAD_FILE_TYPE") {
     return res.status(400).json({ errors: [
