@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 16;
+const API_VERSION = 17;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {
@@ -1184,6 +1184,145 @@ async function renderReport(id) {
 }
 
 /* ── Project page (overview + scorecard) ─────────────────────── */
+/* Per-credit task checklist rendered into `container`. Editable by anyone with
+ * project access (staff or guest), matching Project Notes. The whole list is
+ * PUT on every change (add/edit/check/delete/reorder) — last-write-wins, the
+ * same model as notes. Check/edit mutate in place to avoid flicker; structural
+ * changes (add/delete/reorder) re-render the list and rebind its events. */
+function wireTaskList(container, id, cid, project) {
+  const genId = () => (window.crypto && crypto.randomUUID
+    ? crypto.randomUUID().slice(0, 12)
+    : Math.random().toString(16).slice(2, 14));
+  const getTasks = () => (project.creditTasks || {})[cid] || [];
+  let dragId = null;
+
+  function setLocal(next) {
+    if (!project.creditTasks) project.creditTasks = {};
+    if (next.length) project.creditTasks[cid] = next;
+    else delete project.creditTasks[cid];
+  }
+  async function save(next) {
+    try {
+      const saved = await api("PUT", `/api/projects/${id}/credits/${cid}/tasks`, { tasks: next });
+      project.creditTasks = saved.creditTasks || {};
+    } catch (e) {
+      alert(e.message);
+      render(); // resync UI to last known-good model on failure
+    }
+  }
+  const counterText = () => {
+    const list = getTasks();
+    return list.length ? `${list.filter(t => t.done).length} of ${list.length} done` : "";
+  };
+
+  function render() {
+    const list = getTasks();
+    container.innerHTML = `
+      <div class="task-head">
+        <span class="task-title">Task list</span>
+        <span class="task-counter">${counterText()}</span>
+      </div>
+      <div class="task-items">
+        ${list.map(t => `
+          <div class="task-item" data-task-id="${esc(t.id)}">
+            <span class="task-drag" title="Drag to reorder">&#10303;</span>
+            <input type="checkbox" class="task-check" ${t.done ? "checked" : ""} title="Mark done">
+            <input type="text" class="task-text${t.done ? " done" : ""}" value="${esc(t.text)}" maxlength="500" placeholder="Task description">
+            <button type="button" class="task-delete" title="Delete task">&times;</button>
+          </div>`).join("")}
+      </div>
+      <form class="task-add">
+        <input type="text" class="task-add-input" maxlength="500" placeholder="Add a task — what to work on or upload…">
+        <button type="submit" class="task-add-btn">Add</button>
+      </form>`;
+    bind();
+  }
+
+  function bind() {
+    const counterEl = container.querySelector(".task-counter");
+    const form = container.querySelector(".task-add");
+    const addInput = form.querySelector(".task-add-input");
+    form.addEventListener("submit", ev => {
+      ev.preventDefault();
+      const text = addInput.value.trim();
+      if (!text) return;
+      const next = getTasks().concat({ id: genId(), text, done: false });
+      setLocal(next);
+      render();
+      const again = container.querySelector(".task-add-input");
+      if (again) again.focus();
+      save(next);
+    });
+
+    container.querySelectorAll(".task-item").forEach(row => {
+      const tid = row.dataset.taskId;
+      const check = row.querySelector(".task-check");
+      const textEl = row.querySelector(".task-text");
+      const del = row.querySelector(".task-delete");
+      const handle = row.querySelector(".task-drag");
+
+      // check / uncheck — toggle strikethrough in place, update counter
+      check.addEventListener("change", () => {
+        const next = getTasks().map(t => t.id === tid ? { ...t, done: check.checked } : t);
+        setLocal(next);
+        textEl.classList.toggle("done", check.checked);
+        if (counterEl) counterEl.textContent = counterText();
+        save(next);
+      });
+
+      // edit text — commit on blur / Enter; emptying deletes the task
+      const commit = () => {
+        const cur = getTasks().find(t => t.id === tid);
+        if (!cur) return;
+        const val = textEl.value.trim();
+        if (val === cur.text) return;
+        if (!val) {
+          const next = getTasks().filter(t => t.id !== tid);
+          setLocal(next); render(); save(next); return;
+        }
+        const next = getTasks().map(t => t.id === tid ? { ...t, text: val } : t);
+        setLocal(next); save(next);
+      };
+      textEl.addEventListener("blur", commit);
+      textEl.addEventListener("keydown", ev => {
+        if (ev.key === "Enter") { ev.preventDefault(); textEl.blur(); }
+      });
+
+      del.addEventListener("click", () => {
+        const next = getTasks().filter(t => t.id !== tid);
+        setLocal(next); render(); save(next);
+      });
+
+      // drag to reorder — only the handle starts a drag, so text stays selectable
+      handle.addEventListener("mousedown", () => row.setAttribute("draggable", "true"));
+      row.addEventListener("dragstart", () => { dragId = tid; row.classList.add("dragging"); });
+      row.addEventListener("dragend", () => {
+        dragId = null; row.removeAttribute("draggable");
+        container.querySelectorAll(".task-item").forEach(r => r.classList.remove("dragging", "drop-target"));
+      });
+      row.addEventListener("dragover", ev => {
+        ev.preventDefault();
+        if (dragId && dragId !== tid) row.classList.add("drop-target");
+      });
+      row.addEventListener("dragleave", () => row.classList.remove("drop-target"));
+      row.addEventListener("drop", ev => {
+        ev.preventDefault();
+        row.classList.remove("drop-target");
+        if (!dragId || dragId === tid) return;
+        const list = getTasks().slice();
+        const from = list.findIndex(t => t.id === dragId);
+        const to = list.findIndex(t => t.id === tid);
+        if (from < 0 || to < 0) return;
+        const [moved] = list.splice(from, 1);
+        list.splice(to, 0, moved);
+        setLocal(list); render(); save(list);
+      });
+    });
+  }
+
+  render();
+}
+
 async function renderProject(id) {
   // loadReference() is awaited for its side effect: it populates the module
   // REFERENCE cache that excerptFor()/interpretationsFor() read below. Its
@@ -1309,6 +1448,7 @@ async function renderProject(id) {
                 placeholder="Approach, responsible party, open questions…">${esc(note)}</textarea>
               <span class="doc-meta note-status" data-note-status="${cid}"></span>
             </div>
+            <div class="task-field" data-task-list="${cid}"></div>
             ${docs.length ? docs.map(d => `
               <div class="doc-item">
                 <a href="/api/projects/${project.id}/files/${d.id}" download>${esc(d.name)}</a>
@@ -1657,6 +1797,9 @@ async function renderProject(id) {
       project.creditNotes = saved.creditNotes || {};
       if (statusEl) statusEl.textContent = "Saved";
     });
+  });
+  view.querySelectorAll("[data-task-list]").forEach(container => {
+    wireTaskList(container, id, container.dataset.taskList, project);
   });
   view.querySelectorAll(".doc-remove").forEach(btn => {
     btn.addEventListener("click", async () => {

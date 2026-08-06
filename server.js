@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 16;
+const API_VERSION = 17;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -858,6 +858,40 @@ app.put("/api/projects/:id/credits/:creditId/note", (req, res) => {
   if (!p.creditNotes) p.creditNotes = {};
   if (text) p.creditNotes[req.params.creditId] = text;
   else delete p.creditNotes[req.params.creditId];
+  p.updatedAt = new Date().toISOString();
+  saveProjects();
+  res.json(projectView(p, req));
+});
+
+/* Per-credit task list (checklist), stored apart from status entries so
+ * clearing a credit's Yes/Maybe/No never discards its tasks. The whole array
+ * is replaced on each save (add/edit/check/delete/reorder all become a PUT of
+ * the new list) — last-write-wins, same as notes. */
+const MAX_TASKS_PER_CREDIT = 200;
+const MAX_TASK_LEN = 500;
+app.put("/api/projects/:id/credits/:creditId/tasks", (req, res) => {
+  if (!requireAccess(req, res, req.params.id)) return;
+  const p = findProject(req, res);
+  if (!p) return;
+  const raw = req.body && Array.isArray(req.body.tasks) ? req.body.tasks : null;
+  if (raw === null) return res.status(400).json({ errors: ["tasks must be an array"] });
+  if (raw.length > MAX_TASKS_PER_CREDIT) {
+    return res.status(400).json({ errors: [`Too many tasks (max ${MAX_TASKS_PER_CREDIT} per credit)`] });
+  }
+  const tasks = [];
+  for (const t of raw) {
+    if (!t || typeof t !== "object") continue;
+    const text = typeof t.text === "string" ? t.text.trim() : "";
+    if (!text) continue; // drop blank tasks
+    if (text.length > MAX_TASK_LEN) {
+      return res.status(400).json({ errors: [`A task is too long (max ${MAX_TASK_LEN} characters)`] });
+    }
+    const id = typeof t.id === "string" && t.id ? t.id.slice(0, 32) : crypto.randomBytes(6).toString("hex");
+    tasks.push({ id, text, done: !!t.done });
+  }
+  if (!p.creditTasks) p.creditTasks = {};
+  if (tasks.length) p.creditTasks[req.params.creditId] = tasks;
+  else delete p.creditTasks[req.params.creditId];
   p.updatedAt = new Date().toISOString();
   saveProjects();
   res.json(projectView(p, req));
