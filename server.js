@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 13;
+const API_VERSION = 14;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -65,6 +65,13 @@ function writeFileAtomic(file, data, mode) {
 // Secrets and credentials are owner-only (0600); losing them to another
 // local account would be a session-forgery / password-hash disclosure risk.
 const SECRET_MODE = 0o600;
+// Existing installs predate the 0600 policy, so their secret files keep the
+// permissions they were first written with. Tighten them on load (matching the
+// codebase's migrate-on-startup pattern) so upgrading fixes them automatically.
+function ensureSecretMode(file) {
+  try { if (fs.existsSync(file)) fs.chmodSync(file, SECRET_MODE); }
+  catch (e) { /* best effort on non-POSIX */ }
+}
 
 /* Content sniffing for uploads. The extension allowlist (below) is the first
  * gate; this is the second: read the leading bytes of the stored file and
@@ -198,6 +205,7 @@ function saveProjects() {
 const GUESTS_FILE = path.join(DATA_DIR, "guests.json");
 let guests = {};
 if (fs.existsSync(GUESTS_FILE)) {
+  ensureSecretMode(GUESTS_FILE);
   guests = JSON.parse(fs.readFileSync(GUESTS_FILE, "utf8"));
 }
 function saveGuests() {
@@ -224,13 +232,13 @@ function hashPassword(password, salt) {
 
 const SECRET_FILE = path.join(DATA_DIR, "auth-secret");
 let AUTH_SECRET;
-if (fs.existsSync(SECRET_FILE)) AUTH_SECRET = fs.readFileSync(SECRET_FILE, "utf8").trim();
+if (fs.existsSync(SECRET_FILE)) { ensureSecretMode(SECRET_FILE); AUTH_SECRET = fs.readFileSync(SECRET_FILE, "utf8").trim(); }
 else { AUTH_SECRET = crypto.randomBytes(32).toString("hex"); writeFileAtomic(SECRET_FILE, AUTH_SECRET, SECRET_MODE); }
 
 const STAFF_CODE_FILE = path.join(DATA_DIR, "staff-access-code");
 let STAFF_CODE = (process.env.STAFF_ACCESS_CODE || "").trim();
 if (!STAFF_CODE) {
-  if (fs.existsSync(STAFF_CODE_FILE)) STAFF_CODE = fs.readFileSync(STAFF_CODE_FILE, "utf8").trim();
+  if (fs.existsSync(STAFF_CODE_FILE)) { ensureSecretMode(STAFF_CODE_FILE); STAFF_CODE = fs.readFileSync(STAFF_CODE_FILE, "utf8").trim(); }
   // 12 random bytes (96 bits / 24 hex chars): brute-force-proof even without
   // the rate limiter. Prefer Microsoft SSO where deployed; this shared code
   // is the dev/office fallback.
@@ -390,7 +398,9 @@ function projectView(p, req) {
 
 /* ── API ─────────────────────────────────────────────────────── */
 app.get("/api/meta", (req, res) => {
-  res.json({ apiVersion: API_VERSION });
+  // inviteLinkTtlMs is served (not hard-coded client-side) so the Share panel's
+  // "valid through" date always matches the server's real expiry window.
+  res.json({ apiVersion: API_VERSION, inviteLinkTtlMs: INVITE_LINK_TTL_MS });
 });
 
 app.get("/api/me", (req, res) => {

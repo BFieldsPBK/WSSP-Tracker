@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 13;
+const API_VERSION = 14;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {
@@ -28,6 +28,9 @@ async function api(method, url, body) {
 async function checkVersion() {
   try {
     const meta = await api("GET", "/api/meta");
+    // Adopt the server's real invite-link TTL so the Share panel's "valid
+    // through" date can't drift from when the server actually rejects a link.
+    if (typeof meta.inviteLinkTtlMs === "number") INVITE_LINK_TTL_MS = meta.inviteLinkTtlMs;
     document.getElementById("version-banner")
       .classList.toggle("hidden", meta.apiVersion === API_VERSION);
   } catch (e) { /* server unreachable; fetches elsewhere will surface it */ }
@@ -181,9 +184,11 @@ const pkey = (projectId, item) => `${projectId}|${item}`;
 const sharingOpen = new Set();
 const lastInviteLinks = {};
 
-/* Unactivated setup links expire 14 days after issue (see INVITE_LINK_TTL_MS
- * in server.js) — tell staff whether a pending link is still live. */
-const INVITE_LINK_TTL_MS = 14 * 24 * 3600e3;
+/* How long an unactivated setup link stays live — used only to tell staff
+ * whether a pending link is still valid. This is the authoritative server
+ * window: it defaults to match server.js but is overwritten from /api/meta
+ * (see checkVersion) so the two can never drift. */
+let INVITE_LINK_TTL_MS = 7 * 24 * 3600e3;
 function inviteLinkStatus(inv) {
   const expires = Date.parse(inv.regeneratedAt || inv.createdAt || 0) + INVITE_LINK_TTL_MS;
   return Date.now() > expires
