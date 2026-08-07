@@ -1565,8 +1565,8 @@ async function renderProject(id) {
           <button class="btn btn-secondary" id="share-project">${sharingOpen.has(id) ? "Close Sharing" : "Share"}</button>
           <button class="btn btn-secondary btn-revoke-all" id="revoke-all-guests"
             ${guestCount ? "" : "disabled"}
-            title="${guestCount ? `Revoke access for all ${guestCount} collaborator${guestCount > 1 ? "s" : ""}` : "No collaborators have access"}">
-            ${LOCK_SVG}<span>Revoke Access${guestCount ? ` (${guestCount})` : ""}</span>
+            title="${guestCount ? `Revoke access for ${guestCount} collaborator${guestCount > 1 ? "s" : ""}` : "No collaborators have access"}">
+            ${LOCK_SVG}
           </button>
           <a class="btn btn-secondary" href="#/project/${id}/edit">Edit Details</a>
           <button class="btn btn-quiet" id="delete-project" title="Delete project">Delete</button>` : ""}

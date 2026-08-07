@@ -265,10 +265,16 @@ h1 {
 .btn-quiet { background: none; color: var(--pbk-muted); padding: 9px 10px; }
 .btn-quiet:hover { color: var(--pbk-red); }
 
-/* "Revoke Access" — a secondary button that leans destructive on hover.
- * Compact (matches Share/Edit Details weight) with a lock glyph. */
-.btn-revoke-all { gap: 6px; }
-.btn-revoke-all svg { flex: none; }
+/* "Revoke Access" — icon-only secondary button that leans destructive on hover.
+ * Compact square button with just a lock glyph. */
+.btn-revoke-all { 
+  padding: 9px 11px;
+  min-width: auto;
+}
+.btn-revoke-all svg { 
+  flex: none;
+  display: block;
+}
 .btn-revoke-all:hover:not(:disabled) { border-color: var(--pbk-red); color: var(--pbk-red); }
 .btn:disabled,
 .btn[disabled] { opacity: .5; cursor: not-allowed; }
