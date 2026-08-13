@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 21;
+const API_VERSION = 22;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -668,9 +668,11 @@ const PROJECT_FIELDS = [
   "address", "city", "state", "zip",
   "contactName", "contactPhone", "notes",
   "schoolLevel", "climateZone", "opHours",
-  "zeroToolBaseline", "cbpsBaseline", "projectedEUI", "aiaReductionPct"
+  "zeroToolBaseline", "cbpsBaseline", "projectedEUI", "aiaReductionPct",
+  "sustainabilityNarrative", "projectDescription"
 ];
 const MAX_CUSTOM_DISCIPLINES = 50;
+const MAX_NARRATIVE_LEN = 8000;
 const PROJECT_TYPES = ["new", "newBuilding", "modernization"];
 const SCHOOL_LEVELS = ["", "es", "ms", "hs", "other"];
 const CLIMATE_ZONES = ["", "4C", "5B"];
@@ -703,6 +705,11 @@ function validateProject(body, { partial } = {}) {
   if (out.aiaReductionPct !== undefined && out.aiaReductionPct !== "" &&
       !(Number(out.aiaReductionPct) >= 0 && Number(out.aiaReductionPct) <= 100)) {
     errors.push("aiaReductionPct must be between 0 and 100");
+  }
+  for (const f of ["sustainabilityNarrative", "projectDescription"]) {
+    if (out[f] !== undefined && out[f].length > MAX_NARRATIVE_LEN) {
+      errors.push(`${f} is too long (max ${MAX_NARRATIVE_LEN} characters)`);
+    }
   }
   if (!partial || out.name !== undefined) {
     if (!out.name) errors.push("Project name is required");
@@ -785,6 +792,34 @@ app.put("/api/projects/:id", (req, res) => {
   p.updatedAt = new Date().toISOString();
   saveProjects();
   res.json(projectView(p, req));
+});
+
+/* Dashboard narratives — editable by any team member with project access
+ * (not staff-only), mirroring credit-note collaboration. */
+app.put("/api/projects/:id/narrative", (req, res) => {
+  if (!requireAccess(req, res, req.params.id)) return;
+  const p = findProject(req, res);
+  if (!p) return;
+  const patch = {};
+  for (const f of ["sustainabilityNarrative", "projectDescription"]) {
+    if (req.body && req.body[f] !== undefined) {
+      if (typeof req.body[f] !== "string") {
+        return res.status(400).json({ errors: [`${f} must be a string`] });
+      }
+      const val = req.body[f].trim();
+      if (val.length > MAX_NARRATIVE_LEN) {
+        return res.status(400).json({ errors: [`${f} is too long (max ${MAX_NARRATIVE_LEN} characters)`] });
+      }
+      patch[f] = val;
+    }
+  }
+  Object.assign(p, patch);
+  p.updatedAt = new Date().toISOString();
+  saveProjects();
+  res.json({
+    sustainabilityNarrative: p.sustainabilityNarrative || "",
+    projectDescription: p.projectDescription || ""
+  });
 });
 
 app.put("/api/projects/:id/credits/:creditId", (req, res) => {

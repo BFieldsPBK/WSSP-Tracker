@@ -1431,6 +1431,31 @@ legend {
   color: var(--pbk-ink);
   margin: 22px 0 6px;
 }
+/* Dashboard narrative text areas (Project Description, Sustainability Narrative) */
+.dash-narrative { margin-bottom: 6px; }
+.dash-narrative-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--pbk-font);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--pbk-ink);
+  border: 1px solid var(--pbk-border);
+  border-radius: var(--pbk-radius-sm);
+  padding: 10px 12px;
+  min-height: 96px;
+  resize: vertical;
+  outline: none;
+  background: #fff;
+}
+.dash-narrative-input:focus { border-color: var(--pbk-steel); box-shadow: 0 0 0 3px var(--pbk-bg-light); }
+.dash-narrative-hint {
+  font-size: 11.5px;
+  color: var(--pbk-muted);
+  margin-top: 4px;
+}
+.dash-narrative-status { margin-left: 8px; font-style: italic; }
+.dash-narrative-print { display: none; }   /* shown only when printing */
 .dash-overall {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -1492,6 +1517,17 @@ legend {
   .dash { border: none; box-shadow: none; padding: 0; }
   .dash-grid { grid-template-columns: repeat(3, 1fr); }
   .dash-cat { break-inside: avoid; }
+  /* Render narratives as clean flowing text; drop empty ones from the report. */
+  .dash-narrative-print {
+    display: block;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--pbk-body);
+    white-space: normal;
+    break-inside: avoid;
+  }
+  .dash-narrative-empty { display: none; }
+  .dash-narrative:has(.dash-narrative-empty) { display: none; }
 }
 
 @media print {
