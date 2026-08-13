@@ -1058,7 +1058,7 @@ app.use((err, req, res, next) => {
 });
 
 /* ── Start ───────────────────────────────────────────────────── */
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`WSSP Tracker running at http://localhost:${PORT}`);
   console.log(`Data folder: ${DATA_DIR}`);
   console.log(`Protocols loaded: ${Object.keys(protocols).join(", ")}`);
