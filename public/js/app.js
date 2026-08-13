@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 18;
+const API_VERSION = 19;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {
@@ -146,6 +146,15 @@ function wsspEuiTarget(project) {
 
 function dPhaseInfo(v) {
   return D_PHASES.find(p => p.value === normalizeDPhase(v));
+}
+/* Position of a D-phase in the canonical order, or -1 if unset/unknown. Used
+ * to decide whether a task's due phase has already passed (overdue). */
+function phaseIndex(v) {
+  return D_PHASES.findIndex(p => p.value === normalizeDPhase(v));
+}
+function dPhaseShort(v) {
+  const info = dPhaseInfo(v);
+  return info ? info.code : (v || "");
 }
 function dPhaseOptions(current) {
   const cur = normalizeDPhase(current);
@@ -1219,6 +1228,9 @@ function wireTaskList(container, id, cid, project) {
     : Math.random().toString(16).slice(2, 14));
   const getTasks = () => (project.creditTasks || {})[cid] || [];
   let dragId = null;
+  // Filter state survives re-renders within this credit's panel.
+  let filterDisc = "";
+  let filterPhase = "";
 
   function setLocal(next) {
     if (!project.creditTasks) project.creditTasks = {};
@@ -1234,27 +1246,74 @@ function wireTaskList(container, id, cid, project) {
       render(); // resync UI to last known-good model on failure
     }
   }
-  const counterText = () => {
+
+  // A task is overdue when it's unfinished and its due phase sits earlier in
+  // the SCAP order than the project's current D-phase. Derived on the fly, so
+  // advancing the phase turns tasks red with no stored flag to keep in sync.
+  const isOverdue = t => !t.done &&
+    phaseIndex(t.duePhase) > -1 && phaseIndex(project.dPhase) > -1 &&
+    phaseIndex(t.duePhase) < phaseIndex(project.dPhase);
+
+  const counterHtml = () => {
     const list = getTasks();
-    return list.length ? `${list.filter(t => t.done).length} of ${list.length} done` : "";
+    if (!list.length) return "";
+    const done = list.filter(t => t.done).length;
+    const over = list.filter(isOverdue).length;
+    return `${done} of ${list.length} done` +
+      (over ? ` <span class="task-overdue-count">&middot; ${over} overdue</span>` : "");
+  };
+
+  const filtering = () => !!(filterDisc || filterPhase);
+  const matches = t =>
+    (!filterDisc || t.discipline === filterDisc) &&
+    (!filterPhase || normalizeDPhase(t.duePhase) === filterPhase);
+
+  const discCell = sel => `<option value="">Discipline…</option>` +
+    DISCIPLINES.map(d => `<option value="${d.value}" ${d.value === sel ? "selected" : ""}>${esc(d.label)}</option>`).join("");
+  const phaseCell = sel => {
+    const cur = normalizeDPhase(sel);
+    const known = D_PHASES.some(p => p.value === cur);
+    return `<option value="">Due phase…</option>` +
+      D_PHASES.map(p => `<option value="${p.value}" ${p.value === cur ? "selected" : ""}>${esc(p.code)}</option>`).join("") +
+      (cur && !known ? `<option value="${esc(cur)}" selected>${esc(sel)}</option>` : "");
   };
 
   function render() {
     const list = getTasks();
+    const shown = list.filter(matches);
+    const filtersRow = list.length ? `
+      <div class="task-filters">
+        <span class="task-filter-label">Filter</span>
+        <select class="task-filter-disc" aria-label="Filter tasks by discipline">
+          <option value="">All disciplines</option>
+          ${DISCIPLINES.map(d => `<option value="${d.value}" ${d.value === filterDisc ? "selected" : ""}>${esc(d.label)}</option>`).join("")}
+        </select>
+        <select class="task-filter-phase" aria-label="Filter tasks by due phase">
+          <option value="">All phases</option>
+          ${D_PHASES.map(p => `<option value="${p.value}" ${p.value === filterPhase ? "selected" : ""}>${esc(p.code)}</option>`).join("")}
+        </select>
+        ${filtering() ? `<button type="button" class="task-filter-clear" title="Clear filter">Clear</button>` : ""}
+      </div>` : "";
+    const emptyMsg = (list.length && !shown.length)
+      ? `<div class="task-empty">No tasks match this filter.</div>` : "";
     container.innerHTML = `
       <div class="task-head">
         <span class="task-title">Task list</span>
-        <span class="task-counter">${counterText()}</span>
+        <span class="task-counter">${counterHtml()}</span>
       </div>
+      ${filtersRow}
       <div class="task-items">
-        ${list.map(t => `
-          <div class="task-item" data-task-id="${esc(t.id)}">
-            <span class="task-drag" title="Drag to reorder">&#10303;</span>
+        ${shown.map(t => `
+          <div class="task-item${t.done ? " done" : ""}${isOverdue(t) ? " overdue" : ""}" data-task-id="${esc(t.id)}">
+            <span class="task-drag" title="${filtering() ? "Clear the filter to reorder" : "Drag to reorder"}">&#10303;</span>
             <input type="checkbox" class="task-check" ${t.done ? "checked" : ""} title="Mark done">
             <input type="text" class="task-text${t.done ? " done" : ""}" value="${esc(t.text)}" maxlength="500" placeholder="Task description">
+            <select class="task-disc" title="Assign a discipline">${discCell(t.discipline || "")}</select>
+            <select class="task-phase" title="Due by D-phase">${phaseCell(t.duePhase || "")}</select>
             <button type="button" class="task-delete" title="Delete task">&times;</button>
           </div>`).join("")}
       </div>
+      ${emptyMsg}
       <form class="task-add">
         <input type="text" class="task-add-input" maxlength="500" placeholder="Add a task — what to work on or upload…">
         <button type="submit" class="task-add-btn">Add</button>
@@ -1270,7 +1329,9 @@ function wireTaskList(container, id, cid, project) {
       ev.preventDefault();
       const text = addInput.value.trim();
       if (!text) return;
-      const next = getTasks().concat({ id: genId(), text, done: false });
+      // Clear any active filter so the new task is never added out of view.
+      filterDisc = ""; filterPhase = "";
+      const next = getTasks().concat({ id: genId(), text, done: false, discipline: "", duePhase: "" });
       setLocal(next);
       render();
       const again = container.querySelector(".task-add-input");
@@ -1278,19 +1339,32 @@ function wireTaskList(container, id, cid, project) {
       save(next);
     });
 
+    // filter controls
+    const fDisc = container.querySelector(".task-filter-disc");
+    if (fDisc) fDisc.addEventListener("change", () => { filterDisc = fDisc.value; render(); });
+    const fPhase = container.querySelector(".task-filter-phase");
+    if (fPhase) fPhase.addEventListener("change", () => { filterPhase = fPhase.value; render(); });
+    const fClear = container.querySelector(".task-filter-clear");
+    if (fClear) fClear.addEventListener("click", () => { filterDisc = ""; filterPhase = ""; render(); });
+
     container.querySelectorAll(".task-item").forEach(row => {
       const tid = row.dataset.taskId;
       const check = row.querySelector(".task-check");
       const textEl = row.querySelector(".task-text");
+      const discEl = row.querySelector(".task-disc");
+      const phaseEl = row.querySelector(".task-phase");
       const del = row.querySelector(".task-delete");
       const handle = row.querySelector(".task-drag");
 
-      // check / uncheck — toggle strikethrough in place, update counter
+      // check / uncheck — toggle strikethrough + overdue state in place
       check.addEventListener("change", () => {
         const next = getTasks().map(t => t.id === tid ? { ...t, done: check.checked } : t);
         setLocal(next);
         textEl.classList.toggle("done", check.checked);
-        if (counterEl) counterEl.textContent = counterText();
+        row.classList.toggle("done", check.checked);
+        const updated = next.find(t => t.id === tid);
+        row.classList.toggle("overdue", updated ? isOverdue(updated) : false);
+        if (counterEl) counterEl.innerHTML = counterHtml();
         save(next);
       });
 
@@ -1312,14 +1386,32 @@ function wireTaskList(container, id, cid, project) {
         if (ev.key === "Enter") { ev.preventDefault(); textEl.blur(); }
       });
 
+      // assign discipline — re-render so any active discipline filter re-applies
+      discEl.addEventListener("change", () => {
+        const next = getTasks().map(t => t.id === tid ? { ...t, discipline: discEl.value } : t);
+        setLocal(next); render(); save(next);
+      });
+      // set due phase — re-render so overdue (red) and any phase filter update
+      phaseEl.addEventListener("change", () => {
+        const next = getTasks().map(t => t.id === tid ? { ...t, duePhase: phaseEl.value } : t);
+        setLocal(next); render(); save(next);
+      });
+
       del.addEventListener("click", () => {
         const next = getTasks().filter(t => t.id !== tid);
         setLocal(next); render(); save(next);
       });
 
-      // drag to reorder — only the handle starts a drag, so text stays selectable
-      handle.addEventListener("mousedown", () => row.setAttribute("draggable", "true"));
-      row.addEventListener("dragstart", () => { dragId = tid; row.classList.add("dragging"); });
+      // drag to reorder — disabled while a filter hides part of the list, so a
+      // reorder can't act on a partial view. Only the handle starts a drag, so
+      // text stays selectable.
+      handle.addEventListener("mousedown", () => {
+        if (!filtering()) row.setAttribute("draggable", "true");
+      });
+      row.addEventListener("dragstart", () => {
+        if (filtering()) return;
+        dragId = tid; row.classList.add("dragging");
+      });
       row.addEventListener("dragend", () => {
         dragId = null; row.removeAttribute("draggable");
         container.querySelectorAll(".task-item").forEach(r => r.classList.remove("dragging", "drop-target"));
@@ -1345,6 +1437,50 @@ function wireTaskList(container, id, cid, project) {
   }
 
   render();
+}
+
+/* Modal warning shown when advancing the D-phase leaves unfinished tasks that
+ * were due by an earlier phase. `items` is [{cid, task}]; onConfirm commits the
+ * phase change (the tasks then render red), onCancel reverts the dropdown. */
+function showTaskWarningModal(items, creditNames, onConfirm, onCancel) {
+  const prior = document.querySelector(".modal-overlay");
+  if (prior) prior.remove();
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <h2 id="modal-title" class="modal-title">Are You Sure?</h2>
+      <p class="modal-sub">These Tasks Have Not Been Completed</p>
+      <p class="modal-lede">The following ${items.length === 1 ? "task was" : items.length + " tasks were"} due by an
+        earlier phase and ${items.length === 1 ? "is" : "are"} still open. Changing the phase will mark
+        ${items.length === 1 ? "it" : "them"} overdue (shown in red under each credit).</p>
+      <ul class="modal-tasklist">
+        ${items.map(({ cid, task }) => `
+          <li>
+            <span class="modal-task-credit">${esc((creditNames && creditNames[cid]) ? cid + " · " + creditNames[cid] : cid)}</span>
+            <span class="modal-task-text">${esc(task.text)}</span>
+            <span class="modal-task-meta">${[
+              task.discipline ? esc(disciplineLabel(task.discipline)) : "",
+              task.duePhase ? "due " + esc(dPhaseShort(task.duePhase)) : ""
+            ].filter(Boolean).join(" · ")}</span>
+          </li>`).join("")}
+      </ul>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="modal-cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="modal-confirm">Change phase anyway</button>
+      </div>
+    </div>`;
+  const close = () => {
+    document.removeEventListener("keydown", onKey);
+    overlay.remove();
+  };
+  const onKey = ev => { if (ev.key === "Escape") { close(); onCancel(); } };
+  overlay.querySelector("#modal-cancel").addEventListener("click", () => { close(); onCancel(); });
+  overlay.querySelector("#modal-confirm").addEventListener("click", () => { close(); onConfirm(); });
+  overlay.addEventListener("mousedown", ev => { if (ev.target === overlay) { close(); onCancel(); } });
+  document.addEventListener("keydown", onKey);
+  document.body.appendChild(overlay);
+  overlay.querySelector("#modal-confirm").focus();
 }
 
 async function renderProject(id) {
@@ -1748,10 +1884,34 @@ async function renderProject(id) {
     });
   });
   const dphaseSel = document.getElementById("dphase-select");
-  if (dphaseSel) dphaseSel.addEventListener("change", async ev => {
-    await api("PUT", `/api/projects/${id}`, { dPhase: ev.target.value });
-    renderProject(id);
-  });
+  if (dphaseSel) {
+    const prevPhase = project.dPhase || "";
+    dphaseSel.addEventListener("change", ev => {
+      const newPhase = ev.target.value;
+      const commit = async () => {
+        await api("PUT", `/api/projects/${id}`, { dPhase: newPhase });
+        renderProject(id);
+      };
+      // Only warn when advancing to a later phase: gather every unfinished task
+      // (across all credits) whose due phase now sits in the past.
+      const newIdx = phaseIndex(newPhase);
+      const oldIdx = phaseIndex(prevPhase);
+      const stragglers = [];
+      if (newIdx > oldIdx) {
+        for (const [cid, list] of Object.entries(project.creditTasks || {})) {
+          for (const task of (list || [])) {
+            const di = phaseIndex(task.duePhase);
+            if (!task.done && di > -1 && di < newIdx) stragglers.push({ cid, task });
+          }
+        }
+      }
+      if (stragglers.length) {
+        showTaskWarningModal(stragglers, creditNames, commit, () => { ev.target.value = prevPhase; });
+      } else {
+        commit();
+      }
+    });
+  }
   /* sharing panel (staff only) */
   const shareBtn = document.getElementById("share-project");
   if (shareBtn) shareBtn.addEventListener("click", () => {

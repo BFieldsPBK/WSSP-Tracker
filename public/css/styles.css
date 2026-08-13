@@ -1056,6 +1056,142 @@ legend {
 }
 .task-add-btn:hover { filter: brightness(1.06); }
 
+/* task assignment: discipline + due-phase selects, wrap on narrow panels */
+.task-item { flex-wrap: wrap; }
+.task-text { flex: 1 1 160px; }
+.task-disc, .task-phase {
+  flex: 0 0 auto;
+  font-family: var(--pbk-font);
+  font-size: 12px;
+  color: var(--pbk-body);
+  border: 1px solid var(--pbk-border);
+  border-radius: var(--pbk-radius-sm);
+  padding: 4px 6px;
+  background: #fff;
+  cursor: pointer;
+  max-width: 140px;
+}
+.task-disc { max-width: 150px; }
+.task-phase { max-width: 96px; }
+.task-disc:focus, .task-phase:focus {
+  outline: none;
+  border-color: var(--pbk-steel);
+  box-shadow: 0 0 0 3px var(--pbk-bg-light);
+}
+/* overdue: unfinished task whose due phase has already passed */
+.task-item.overdue .task-text { color: var(--pbk-red); font-weight: 600; }
+.task-item.overdue .task-phase { border-color: var(--pbk-red); color: var(--pbk-red); }
+.task-item.overdue.done .task-text { color: var(--pbk-muted); font-weight: 400; }
+.task-overdue-count { color: var(--pbk-red); font-weight: 600; }
+
+/* per-credit task filter row */
+.task-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.task-filter-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--pbk-muted);
+}
+.task-filter-disc, .task-filter-phase {
+  font-family: var(--pbk-font);
+  font-size: 12px;
+  color: var(--pbk-body);
+  border: 1px solid var(--pbk-border);
+  border-radius: var(--pbk-radius-sm);
+  padding: 4px 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.task-filter-clear {
+  font-family: var(--pbk-font);
+  font-size: 12px;
+  color: var(--pbk-steel);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  text-decoration: underline;
+}
+.task-empty {
+  font-size: 12.5px;
+  color: var(--pbk-muted);
+  font-style: italic;
+  padding: 6px 2px;
+}
+
+/* modal — phase-change warning for unfinished, past-due tasks */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 30, 40, .48);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+.modal-card {
+  background: var(--pbk-card);
+  border-radius: var(--pbk-radius);
+  box-shadow: var(--pbk-shadow-hover);
+  max-width: 520px;
+  width: 100%;
+  max-height: 82vh;
+  overflow-y: auto;
+  padding: 22px 24px;
+}
+.modal-title {
+  font-family: var(--pbk-font-heading);
+  font-size: 24px;
+  color: var(--pbk-red);
+  margin: 0 0 2px;
+}
+.modal-sub {
+  font-family: var(--pbk-font-heading);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--pbk-ink);
+  margin: 0 0 10px;
+}
+.modal-lede { font-size: 13.5px; color: var(--pbk-body); margin: 0 0 14px; }
+.modal-tasklist {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+  border: 1px solid var(--pbk-border);
+  border-radius: var(--pbk-radius-sm);
+  overflow: hidden;
+}
+.modal-tasklist li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--pbk-border);
+}
+.modal-tasklist li:last-child { border-bottom: none; }
+.modal-task-credit {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--pbk-muted);
+}
+.modal-task-text { font-size: 13.5px; color: var(--pbk-ink); }
+.modal-task-meta { font-size: 12px; color: var(--pbk-body); }
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 /* reference page */
 .section-title {
   font-family: var(--pbk-font-heading);

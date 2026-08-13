@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 18;
+const API_VERSION = 19;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -170,7 +170,8 @@ for (const p of Object.values(protocols)) {
 /* SCAP D-Form phases — single-sourced with the frontend; the same file is
  * loaded by the browser via a <script> tag. Legacy free-text values like
  * "D4" or "d-5" normalize to canonical keys; unrecognized values are kept. */
-const { normalizeDPhase } = require("./public/js/d-phases.js");
+const { D_PHASES, normalizeDPhase } = require("./public/js/d-phases.js");
+const { isDiscipline } = require("./public/js/disciplines.js");
 
 /* ── Store ───────────────────────────────────────────────────── */
 let projects = [];
@@ -918,7 +919,14 @@ app.put("/api/projects/:id/credits/:creditId/tasks", (req, res) => {
       return res.status(400).json({ errors: [`A task is too long (max ${MAX_TASK_LEN} characters)`] });
     }
     const id = typeof t.id === "string" && t.id ? t.id.slice(0, 32) : crypto.randomBytes(6).toString("hex");
-    tasks.push({ id, text, done: !!t.done });
+    // Optional assignment metadata. Discipline must be a recognized key;
+    // duePhase is normalized to a canonical D-phase and must be a known one.
+    // Anything unrecognized is stored as "" (unassigned) rather than rejected,
+    // so a stale client can't wedge a save.
+    const discipline = typeof t.discipline === "string" && isDiscipline(t.discipline) ? t.discipline : "";
+    let duePhase = typeof t.duePhase === "string" ? normalizeDPhase(t.duePhase) : "";
+    if (duePhase && !D_PHASES.some(p => p.value === duePhase)) duePhase = "";
+    tasks.push({ id, text, done: !!t.done, discipline, duePhase });
   }
   if (!p.creditTasks) p.creditTasks = {};
   if (tasks.length) p.creditTasks[req.params.creditId] = tasks;
