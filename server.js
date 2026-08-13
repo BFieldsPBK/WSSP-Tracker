@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 /* Bump whenever the API changes shape. The frontend declares the version it
  * was built against; a mismatch shows a "restart the server" banner instead
  * of letting edits silently fail. */
-const API_VERSION = 19;
+const API_VERSION = 20;
 
 const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
@@ -670,6 +670,7 @@ const PROJECT_FIELDS = [
   "schoolLevel", "climateZone", "opHours",
   "zeroToolBaseline", "cbpsBaseline", "projectedEUI", "aiaReductionPct"
 ];
+const MAX_CUSTOM_DISCIPLINES = 50;
 const PROJECT_TYPES = ["new", "newBuilding", "modernization"];
 const SCHOOL_LEVELS = ["", "es", "ms", "hs", "other"];
 const CLIMATE_ZONES = ["", "4C", "5B"];
@@ -717,6 +718,23 @@ function validateProject(body, { partial } = {}) {
   }
   if (!partial || out.district !== undefined) {
     if (!out.district) errors.push("School district is required");
+  }
+  if (body.customDisciplines !== undefined) {
+    if (!Array.isArray(body.customDisciplines)) {
+      errors.push("customDisciplines must be an array");
+    } else {
+      out.customDisciplines = [];
+      for (const d of body.customDisciplines) {
+        if (typeof d !== "string") { errors.push("Each custom discipline must be a string"); break; }
+        const trimmed = d.trim();
+        if (trimmed.length === 0) continue;
+        if (trimmed.length > 100) { errors.push("Custom discipline name too long (max 100 chars)"); break; }
+        out.customDisciplines.push(trimmed);
+      }
+      if (out.customDisciplines.length > MAX_CUSTOM_DISCIPLINES) {
+        errors.push(`Too many custom disciplines (max ${MAX_CUSTOM_DISCIPLINES})`);
+      }
+    }
   }
   return { errors, out };
 }

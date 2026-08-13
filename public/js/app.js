@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 19;
+const API_VERSION = 20;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {
@@ -1268,8 +1268,17 @@ function wireTaskList(container, id, cid, project) {
     (!filterDisc || t.discipline === filterDisc) &&
     (!filterPhase || normalizeDPhase(t.duePhase) === filterPhase);
 
-  const discCell = sel => `<option value="">Discipline…</option>` +
-    DISCIPLINES.map(d => `<option value="${d.value}" ${d.value === sel ? "selected" : ""}>${esc(d.label)}</option>`).join("");
+  const getAllDisciplines = () => {
+    const customs = (project.customDisciplines || []).map(label => ({ value: label, label }));
+    return [...DISCIPLINES, ...customs];
+  };
+
+  const discCell = sel => {
+    const all = getAllDisciplines();
+    return `<option value="">Discipline…</option>` +
+      all.map(d => `<option value="${d.value}" ${d.value === sel ? "selected" : ""}>${esc(d.label)}</option>`).join("") +
+      `<option value="__ADD_NEW__">➕ Add new discipline...</option>`;
+  };
   const phaseCell = sel => {
     const cur = normalizeDPhase(sel);
     const known = D_PHASES.some(p => p.value === cur);
@@ -1281,12 +1290,13 @@ function wireTaskList(container, id, cid, project) {
   function render() {
     const list = getTasks();
     const shown = list.filter(matches);
+    const allDiscs = getAllDisciplines();
     const filtersRow = list.length ? `
       <div class="task-filters">
         <span class="task-filter-label">Filter</span>
         <select class="task-filter-disc" aria-label="Filter tasks by discipline">
           <option value="">All disciplines</option>
-          ${DISCIPLINES.map(d => `<option value="${d.value}" ${d.value === filterDisc ? "selected" : ""}>${esc(d.label)}</option>`).join("")}
+          ${allDiscs.map(d => `<option value="${d.value}" ${d.value === filterDisc ? "selected" : ""}>${esc(d.label)}</option>`).join("")}
         </select>
         <select class="task-filter-phase" aria-label="Filter tasks by due phase">
           <option value="">All phases</option>
@@ -1387,7 +1397,24 @@ function wireTaskList(container, id, cid, project) {
       });
 
       // assign discipline — re-render so any active discipline filter re-applies
-      discEl.addEventListener("change", () => {
+      discEl.addEventListener("change", async () => {
+        if (discEl.value === "__ADD_NEW__") {
+          const result = await showAddDisciplineModal(project, getAllDisciplines);
+          if (result) {
+            // Re-render to pick up the new custom discipline in all dropdowns
+            render();
+            // Now assign it to this task
+            const sel = container.querySelector(`.task-item[data-task-id="${tid}"] .task-disc`);
+            if (sel) sel.value = result;
+            const next = getTasks().map(t => t.id === tid ? { ...t, discipline: result } : t);
+            setLocal(next); save(next);
+          } else {
+            // User cancelled — reset dropdown to previous value
+            const cur = getTasks().find(t => t.id === tid);
+            discEl.value = cur ? (cur.discipline || "") : "";
+          }
+          return;
+        }
         const next = getTasks().map(t => t.id === tid ? { ...t, discipline: discEl.value } : t);
         setLocal(next); render(); save(next);
       });
@@ -1439,9 +1466,88 @@ function wireTaskList(container, id, cid, project) {
   render();
 }
 
-/* Modal warning shown when advancing the D-phase leaves unfinished tasks that
- * were due by an earlier phase. `items` is [{cid, task}]; onConfirm commits the
- * phase change (the tasks then render red), onCancel reverts the dropdown. */
+/* Modal for adding a custom discipline to a project. Returns promise that resolves
+ * to the new discipline name (string) on success, or null if cancelled. */
+function showAddDisciplineModal(project, getAllDisciplines) {
+  return new Promise(resolve => {
+    const prior = document.querySelector(".modal-overlay");
+    if (prior) prior.remove();
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `
+      <div class="modal-card" style="max-width: 28rem;">
+        <h3 class="modal-title">Add New Discipline</h3>
+        <p class="modal-sub">Enter the name of the specialist or consultant discipline</p>
+        <form class="modal-discipline-form">
+          <input type="text" class="modal-discipline-input" placeholder="e.g., Acoustical Engineer" maxlength="100" autofocus>
+          <div class="modal-discipline-error" style="color: var(--pbk-red); font-size: 0.875rem; margin-top: 0.5rem; min-height: 1.25rem;"></div>
+        </form>
+        <div class="modal-actions">
+          <button type="button" class="modal-btn-cancel">Cancel</button>
+          <button type="submit" form="discipline-form-id" class="modal-btn-confirm">Add Discipline</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    const card = overlay.querySelector(".modal-card");
+    const form = overlay.querySelector(".modal-discipline-form");
+    const input = overlay.querySelector(".modal-discipline-input");
+    const errorEl = overlay.querySelector(".modal-discipline-error");
+    const cancelBtn = overlay.querySelector(".modal-btn-cancel");
+    const confirmBtn = overlay.querySelector(".modal-btn-confirm");
+
+    const cleanup = () => { overlay.remove(); };
+    const cancel = () => { cleanup(); resolve(null); };
+
+    const submit = async () => {
+      const name = input.value.trim();
+      if (!name) {
+        errorEl.textContent = "Discipline name is required";
+        return;
+      }
+      
+      // Check for duplicates in both default and custom disciplines
+      const existing = getAllDisciplines();
+      const dup = existing.find(d => d.value.toLowerCase() === name.toLowerCase());
+      if (dup) {
+        errorEl.textContent = `"${dup.label}" already exists`;
+        return;
+      }
+
+      // Add to project's custom disciplines and save
+      if (!project.customDisciplines) project.customDisciplines = [];
+      project.customDisciplines.push(name);
+      
+      try {
+        const resp = await fetch(`/api/projects/${project.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ customDisciplines: project.customDisciplines })
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          errorEl.textContent = err.errors?.[0] || "Failed to save discipline";
+          return;
+        }
+        cleanup();
+        resolve(name);
+      } catch (e) {
+        errorEl.textContent = "Network error";
+      }
+    };
+
+    form.addEventListener("submit", ev => { ev.preventDefault(); submit(); });
+    confirmBtn.addEventListener("click", submit);
+    cancelBtn.addEventListener("click", cancel);
+    overlay.addEventListener("click", ev => { if (ev.target === overlay) cancel(); });
+    document.addEventListener("keydown", function escHandler(ev) {
+      if (ev.key === "Escape") { cancel(); document.removeEventListener("keydown", escHandler); }
+    });
+
+    setTimeout(() => input.focus(), 50);
+  });
+}
+
 function showTaskWarningModal(items, creditNames, onConfirm, onCancel) {
   const prior = document.querySelector(".modal-overlay");
   if (prior) prior.remove();
