@@ -3,7 +3,7 @@
  */
 "use strict";
 
-const API_VERSION = 20;
+const API_VERSION = 21;
 
 /* ── API helpers ─────────────────────────────────────────────── */
 async function api(method, url, body) {
@@ -99,6 +99,70 @@ function excerptFor(protocolId, creditId) {
   if (ex[creditId]) return ex[creditId];
   const parent = creditId.replace(/\.\d+$/, "");
   return parent !== creditId ? ex[parent] : undefined;
+}
+
+/* Turn a raw handbook excerpt (auto-extracted from the PDF, so riddled with
+ * mid-sentence line breaks, doubled "• •" bullets and inline bullet runs) into
+ * clean HTML that mirrors the WSSP handbook layout: a bold point/label lead-in,
+ * a proper bulleted list, and bold sub-headers ("Wetlands:", "Required:", …).
+ * The source JSON is left untouched — all reshaping happens here at render time. */
+function boldExcerptLabel(escText) {
+  // "Required:" / "Required-" / "Required —" lead-in
+  let m = escText.match(/^(Required)(\s*[:\-–—]\s*)/i);
+  if (m) return `<strong>${m[1]}</strong>${m[2]}${escText.slice(m[0].length)}`;
+  // "1 point:" / "1-2 points:" point-value lead-in
+  m = escText.match(/^(\d+(?:\s*[–-]\s*\d+)?\s+points?\s*:)/i);
+  if (m) return `<strong>${m[1]}</strong>${escText.slice(m[1].length)}`;
+  // Generic "Label:" sub-header (e.g. "Wetlands:", "100-Year Flood Plains:")
+  m = escText.match(/^([A-Z0-9][^:]{1,45}:)(\s)/);
+  if (m) return `<strong>${m[1]}</strong>${m[2]}${escText.slice(m[0].length)}`;
+  return escText;
+}
+function isExcerptHeader(text) {
+  return /^Required\s*[:\-–—]/i.test(text) ||
+    /^\d+(?:\s*[–-]\s*\d+)?\s+points?\s*:/i.test(text) ||
+    /^[A-Z0-9][^:]{1,45}:\s/.test(text);
+}
+function formatExcerpt(raw) {
+  const segments = String(raw ?? "").replace(/\r/g, "").split(/\n{2,}/)
+    .map(s => s.replace(/\s+/g, " ").trim()).filter(Boolean);
+  // 1) Tokenize into text / bullet items, splitting inline "•" runs.
+  const items = [];
+  for (const seg of segments) {
+    if (seg.includes("•")) {
+      const parts = seg.split(/(?:•\s*)+/).map(p => p.trim());
+      if (parts[0]) items.push({ kind: "text", text: parts[0] });
+      for (const p of parts.slice(1)) if (p) items.push({ kind: "bullet", text: p });
+    } else {
+      items.push({ kind: "text", text: seg });
+    }
+  }
+  // 2) Merge continuation lines (lowercase / non-header text) into the prior item.
+  const merged = [];
+  for (const it of items) {
+    const last = merged[merged.length - 1];
+    if (it.kind === "text" && last && !isExcerptHeader(it.text)) {
+      last.text += " " + it.text;
+    } else {
+      merged.push({ ...it });
+    }
+  }
+  // 3) Render: consecutive bullets → <ul>, everything else → <p> with bold label.
+  let html = "";
+  for (let i = 0; i < merged.length;) {
+    if (merged[i].kind === "bullet") {
+      let lis = "";
+      while (i < merged.length && merged[i].kind === "bullet") {
+        lis += `<li>${boldExcerptLabel(esc(merged[i].text))}</li>`;
+        i++;
+      }
+      html += `<ul class="excerpt-list">${lis}</ul>`;
+    } else {
+      html += `<p>${boldExcerptLabel(esc(merged[i].text))}</p>`;
+      i++;
+    }
+  }
+  return html;
 }
 
 /* OSPI interpretations attached to a credit (or its parent) for an edition. */
@@ -1680,7 +1744,7 @@ async function renderProject(id) {
             ${excerpt ? `
               <details class="excerpt-box">
                 <summary>Requirement — ${esc(protocol.name)} handbook excerpt</summary>
-                <div class="excerpt-text">${esc(excerpt).replace(/\n\n/g, "<br><br>")}</div>
+                <div class="excerpt-text">${formatExcerpt(excerpt)}</div>
                 <div class="doc-meta">Auto-extracted for reference — always confirm against the official OSPI handbook.</div>
               </details>` : ""}
             ${interps.map(i => `

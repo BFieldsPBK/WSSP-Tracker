@@ -938,6 +938,13 @@ legend {
 .excerpt-text, .interp-body { padding: 2px 14px 10px; color: var(--pbk-body); }
 .excerpt-box .doc-meta { display: block; padding: 0 14px 10px; }
 .interp-body p { margin: 6px 0; }
+/* Handbook excerpt — mirror the WSSP document layout: readable paragraphs,
+ * bold lead-in/sub-headers, and a properly indented bullet list. */
+.excerpt-text p { margin: 8px 0; line-height: 1.5; }
+.excerpt-text p:first-child { margin-top: 2px; }
+.excerpt-text strong { color: var(--pbk-ink, var(--pbk-body)); font-weight: 600; }
+.excerpt-text .excerpt-list { margin: 8px 0; padding-left: 22px; list-style: disc; }
+.excerpt-text .excerpt-list li { margin: 4px 0; line-height: 1.5; padding-left: 4px; }
 
 .note-field { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 10px; }
 .note-field label {
