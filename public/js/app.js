@@ -277,6 +277,12 @@ const openDocPanels = new Set();
 const openPurposes = new Set();
 const expandedCats = new Set();
 const pkey = (projectId, item) => `${projectId}|${item}`;
+/* Active score-card filter: null | "yes" | "maybeYes" | "req". When set, the
+ * credit stack shows only credits matching that stat card. Cleared on every
+ * fresh project load so it never leaks between projects/navigations. */
+let creditFilter = null;
+let creditFilterProject = null;   // project id the active filter belongs to
+const FILTER_LABELS = { yes: "Yes", maybeYes: "Maybe Yes", req: "Required credits" };
 /* Sharing panel open state and the most recently created invite link per project. */
 const sharingOpen = new Set();
 const lastInviteLinks = {};
@@ -1715,6 +1721,10 @@ async function renderProject(id) {
   if (!protocol) throw new Error(`Unknown protocol: ${project.protocolId}`);
   const staff = isStaffUser();
 
+  // A score-card filter belongs to one project; drop it if we've navigated
+  // to (or reloaded) a different project so it never leaks across projects.
+  if (creditFilterProject !== id) { creditFilter = null; creditFilterProject = id; }
+
   const exclusiveMap = {}, conflictMap = {}, creditNames = {};
   for (const cat of protocol.categories)
     for (const g of cat.groups)
@@ -1734,23 +1744,27 @@ async function renderProject(id) {
 
   const catSection = cat => {
     const c = score.byCategory[cat.id] || { yes: 0, maybe: 0, reqTotal: 0, reqMet: 0 };
-    const collapsed = !expandedCats.has(pkey(id, cat.id));
+    // A filter always shows its matches, so force categories open while one is active.
+    const collapsed = creditFilter ? false : !expandedCats.has(pkey(id, cat.id));
     const rows = cat.groups.map(g => {
       const gkey = pkey(id, `${cat.id}|${g.name}`);
       const purposeOpen = openPurposes.has(gkey);
-      return `
-      <div class="group-name ${g.purpose ? "has-purpose" : ""}" ${g.purpose ? `data-purpose-toggle="${esc(gkey)}"` : ""}
-        ${g.purpose ? `title="Click to ${purposeOpen ? "hide" : "show"} this section's purpose"` : ""}>
-        ${esc(g.name)}${g.purpose ? `<span class="purpose-chev">${purposeOpen ? "▾" : "▸"} purpose</span>` : ""}
-      </div>
-      ${g.purpose && purposeOpen ? `<div class="group-purpose"><b>Purpose.</b> ${esc(g.purpose)}</div>` : ""}
-      ${g.credits.map(([cid, cname, spec]) => {
+      const creditsHtml = g.credits.map(([cid, cname, spec]) => {
         const pts = parsePoints(spec);
         if (pts.header) {
-          return `<div class="credit-header-row"><span class="credit-id">${esc(cid)}</span><span class="credit-name">${esc(cname)}</span></div>`;
+          // Sub-headers are structural, not credits — hide them while filtering.
+          return creditFilter ? "" : `<div class="credit-header-row"><span class="credit-id">${esc(cid)}</span><span class="credit-name">${esc(cname)}</span></div>`;
         }
         const entry = project.credits[cid];
         const status = entry ? entry.status : "none";
+        // Score-card filter: keep only credits matching the active card.
+        if (creditFilter) {
+          const match = creditFilter === "req" ? pts.required
+            : creditFilter === "yes" ? status === "yes"
+            : creditFilter === "maybeYes" ? status === "maybeYes"
+            : true;
+          if (!match) return "";
+        }
         const na = !!(project.notApplicable || {})[cid];
         const exemption = (project.exemptions || {})[cid] || "";
         // exclusive alternate pathways: gray out unselected alternates
@@ -1876,9 +1890,20 @@ async function renderProject(id) {
                 class="${status === st ? "on-" + st : ""}">${STATUS_LABELS[st]}</button>`).join("")}
             </span>`}
           </div>${docPanel}`;
-      }).join("")}
+      }).join("");
+      // While filtering, drop groups that have no matching credits.
+      if (creditFilter && !creditsHtml.trim()) return "";
+      return `
+      <div class="group-name ${g.purpose ? "has-purpose" : ""}" ${g.purpose ? `data-purpose-toggle="${esc(gkey)}"` : ""}
+        ${g.purpose ? `title="Click to ${purposeOpen ? "hide" : "show"} this section's purpose"` : ""}>
+        ${esc(g.name)}${g.purpose ? `<span class="purpose-chev">${purposeOpen ? "▾" : "▸"} purpose</span>` : ""}
+      </div>
+      ${g.purpose && purposeOpen ? `<div class="group-purpose"><b>Purpose.</b> ${esc(g.purpose)}</div>` : ""}
+      ${creditsHtml}
     `;
     }).join("");
+    // While filtering, drop whole categories that have no matching credits.
+    if (creditFilter && !rows.trim()) return "";
     return `
       <section class="card category cat-${cat.id}">
         <div class="category-head" data-cat-toggle="${cat.id}"
@@ -1900,6 +1925,16 @@ async function renderProject(id) {
 
   const goalPct = goal ? Math.min(100, (score.yes / goal) * 100) : 0;
   const maybePct = goal ? Math.min(100, ((score.yes + score.maybeYes) / goal) * 100) : 0;
+
+  // How many credits the active filter matches (kept in lock-step with the
+  // render match logic above so the "N credits" count equals rows shown).
+  let filterCount = 0;
+  if (creditFilter) eachCredit(protocol, ({ id: cid, pts }) => {
+    const st = project.credits[cid]?.status || "none";
+    if (creditFilter === "req" ? pts.required
+      : creditFilter === "yes" ? st === "yes"
+      : creditFilter === "maybeYes" ? st === "maybeYes" : false) filterCount++;
+  });
 
   // Number of distinct collaborators who currently hold access (staff only see
   // the invite list). Access is derived from active, non-revoked invites, so
@@ -1947,9 +1982,12 @@ async function renderProject(id) {
 
       <div class="score-summary">
         <div class="card stat target"><div class="num">${goal ?? "—"}</div><div class="lbl">Points required</div></div>
-        <div class="card stat yes"><div class="num">${score.yes}</div><div class="lbl">Points — Yes</div></div>
-        <div class="card stat maybe"><div class="num">${score.maybeYes}</div><div class="lbl">Points — Maybe Yes</div></div>
-        <div class="card stat req"><div class="num">${score.reqMet}/${score.reqTotal}</div><div class="lbl">Required credits met</div></div>
+        <div class="card stat yes stat-filter${creditFilter === "yes" ? " stat-active" : ""}" data-filter="yes" role="button" tabindex="0"
+          title="Click to show only credits marked Yes"><div class="num">${score.yes}</div><div class="lbl">Points — Yes</div></div>
+        <div class="card stat maybe stat-filter${creditFilter === "maybeYes" ? " stat-active" : ""}" data-filter="maybeYes" role="button" tabindex="0"
+          title="Click to show only credits marked Maybe Yes"><div class="num">${score.maybeYes}</div><div class="lbl">Points — Maybe Yes</div></div>
+        <div class="card stat req stat-filter${creditFilter === "req" ? " stat-active" : ""}" data-filter="req" role="button" tabindex="0"
+          title="Click to show all required credits"><div class="num">${score.reqMet}/${score.reqTotal}</div><div class="lbl">Required credits met</div></div>
       </div>
       <div class="progress-wrap">
         <div class="progress-track">
@@ -2020,6 +2058,11 @@ async function renderProject(id) {
       </section>`;
     })() : ""}
 
+    ${creditFilter ? `
+    <div class="filter-bar no-print">
+      <span class="filter-bar-label">Showing: <b>${FILTER_LABELS[creditFilter]}</b> — ${filterCount} credit${filterCount === 1 ? "" : "s"}</span>
+      <button type="button" class="btn btn-quiet" id="clear-filter">Clear filter ✕</button>
+    </div>` : ""}
     <div class="cat-stack-controls no-print">
       <button type="button" class="btn btn-secondary" id="expand-all-cats">Expand All</button>
       <button type="button" class="btn btn-secondary" id="collapse-all-cats">Collapse All</button>
@@ -2093,6 +2136,24 @@ async function renderProject(id) {
   const collapseAllBtn = view.querySelector("#collapse-all-cats");
   if (collapseAllBtn) collapseAllBtn.addEventListener("click", () => {
     protocol.categories.forEach(cat => expandedCats.delete(pkey(id, cat.id)));
+    renderProject(id);
+  });
+  /* Score-card filters: clicking a stat card narrows the stack to its credits;
+   * clicking the active card again (or "Clear filter") shows everything. */
+  const applyFilter = f => {
+    creditFilter = creditFilter === f ? null : f;
+    creditFilterProject = id;
+    renderProject(id);
+  };
+  view.querySelectorAll(".stat-filter").forEach(card => {
+    card.addEventListener("click", () => applyFilter(card.dataset.filter));
+    card.addEventListener("keydown", ev => {
+      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); applyFilter(card.dataset.filter); }
+    });
+  });
+  const clearFilterBtn = view.querySelector("#clear-filter");
+  if (clearFilterBtn) clearFilterBtn.addEventListener("click", () => {
+    creditFilter = null;
     renderProject(id);
   });
   view.querySelectorAll("[data-purpose-toggle]").forEach(el => {

@@ -619,6 +619,34 @@ legend {
 .stat.target { border-left-color: var(--pbk-red); }
 .stat.req    { border-left-color: var(--pbk-steel); }
 
+/* Clickable score cards double as credit-stack filters. */
+.stat-filter {
+  cursor: pointer;
+  transition: box-shadow .15s, transform .05s, background .15s;
+}
+.stat-filter:hover { box-shadow: var(--pbk-shadow, 0 2px 10px rgba(0,0,0,.10)); }
+.stat-filter:active { transform: translateY(1px); }
+.stat-filter:focus-visible { outline: 2px solid var(--pbk-primary-49); outline-offset: 2px; }
+.stat-filter.stat-active {
+  background: var(--pbk-primary-06, #f2f5f8);
+  box-shadow: inset 0 0 0 2px var(--pbk-primary-49);
+}
+
+/* "Showing: <filter> — N credits · Clear" bar above the credit stack. */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 12px;
+  padding: 8px 14px;
+  background: var(--pbk-primary-06, #f2f5f8);
+  border: 1px solid var(--pbk-border);
+  border-radius: var(--pbk-radius-sm);
+}
+.filter-bar-label { font-size: 13.5px; color: var(--pbk-ink); }
+.filter-bar .btn { padding: 4px 10px; font-size: 12.5px; }
+
 .progress-wrap { margin: 4px 0 20px; }
 .progress-track {
   position: relative;
