@@ -646,6 +646,18 @@ legend {
 }
 
 /* ── Scorecard ─────────────────────────────────────────────────── */
+/* ── Collapse All / Expand All control bar ──────────────────────── */
+.cat-stack-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.cat-stack-controls .btn {
+  font-size: 12.5px;
+  padding: 5px 14px;
+}
+
 .category { margin-bottom: 22px; overflow: hidden; }
 .category-head {
   display: flex;

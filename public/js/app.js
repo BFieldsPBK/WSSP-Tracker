@@ -2020,6 +2020,10 @@ async function renderProject(id) {
       </section>`;
     })() : ""}
 
+    <div class="cat-stack-controls no-print">
+      <button type="button" class="btn btn-secondary" id="expand-all-cats">Expand All</button>
+      <button type="button" class="btn btn-secondary" id="collapse-all-cats">Collapse All</button>
+    </div>
     ${protocol.categories.map(catSection).join("")}
   `;
 
@@ -2080,6 +2084,16 @@ async function renderProject(id) {
       else expandedCats.add(k);
       renderProject(id);
     });
+  });
+  const expandAllBtn = view.querySelector("#expand-all-cats");
+  if (expandAllBtn) expandAllBtn.addEventListener("click", () => {
+    protocol.categories.forEach(cat => expandedCats.add(pkey(id, cat.id)));
+    renderProject(id);
+  });
+  const collapseAllBtn = view.querySelector("#collapse-all-cats");
+  if (collapseAllBtn) collapseAllBtn.addEventListener("click", () => {
+    protocol.categories.forEach(cat => expandedCats.delete(pkey(id, cat.id)));
+    renderProject(id);
   });
   view.querySelectorAll("[data-purpose-toggle]").forEach(el => {
     el.addEventListener("click", () => {
