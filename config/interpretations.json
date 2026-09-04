@@ -1,0 +1,123 @@
+[
+  {
+    "id": "cil-2017-03-20-version",
+    "issuedUnder": "WSSP 2015 Second Publication",
+    "date": "2017-03-20",
+    "subject": "Which version of the protocol do I use for my project?",
+    "general": true,
+    "creditRefs": {},
+    "background": "Addendum #1 was released on November 15, 2016 stating that it was applicable to all projects permitted under 2015 building code. Addendum #1 has been incorporated into WSSP 2015 Edition Second Publication, with an effective date of November 15, 2016. SCAP projects with a D4 approval, and any other applicable projects with a budget appropriation after that date will apply the Second Publication.",
+    "request": "We are working on a number of projects that received D4 in the spring of 2016 (before Addendum #1 was released). When Addendum #1 was released we updated our WSSP documents to incorporate the new requirements. Now that Addendum #1 has been incorporated we are using the Second Publication protocol and scorecard. Can we continue down this path even though WSSP 2015 was in effect when our projects received D4?",
+    "interpretation": "Yes. Projects may always choose to use a more recent version of the protocol than is required (based on D4 approval or budget appropriation)."
+  },
+  {
+    "id": "cil-2017-05-17-skills-center",
+    "issuedUnder": "WSSP 2015 Second Publication",
+    "date": "2017-05-17",
+    "subject": "Determining the minimum number of points for a skills center project",
+    "general": true,
+    "creditRefs": {},
+    "background": "Skills center projects receive state capital funding through a direct appropriation in the state capital budget. New and modernization projects, if applicable in size and value, must meet the high-performance school requirements. Skills centers serve students from more than one school district, but one district is responsible for maintenance and operations. That district is considered the host district.",
+    "request": "What is the minimum number of points that a skills center must earn?",
+    "interpretation": "The minimum number of points is determined by the host district class. (Under WSSP 2015: a Class I district project must earn a minimum of 45 points on a new school or new building project, a Class II a minimum of 40. A modernization of a skills center hosted by a Class I district must earn a minimum of 34 points, a Class II a minimum of 29.) Confirm current-edition skills center minimums with OSPI."
+  },
+  {
+    "id": "cil-2017-09-22-heat-island",
+    "issuedUnder": "WSSP 2015 Second Publication",
+    "date": "2017-09-22",
+    "subject": "Combining strategies for Reduce Heat Island – Site",
+    "general": false,
+    "creditRefs": { "wssp-2018": ["S4.3"], "wssp-2023": ["S4.3"] },
+    "background": "Employing landscape design strategies and materials can minimize heat absorption on building sites.",
+    "request": "As written the credit shows 3 alternative ways to reduce the heat island effect of site improvements, each listed as an OR: by shading 30% of the impervious surfaces, by using materials with a reflectance of at least 0.3 on 30% of the impervious surfaces, by using open grid paving on 50% of the parking area. Can we combine the use of shading and the use of 0.3 reflectance materials to achieve the 30%?",
+    "interpretation": "Yes, you may combine the shading and the use of high reflectance materials to reach the 30%."
+  },
+  {
+    "id": "cil-2015-02-16-recycled-content",
+    "issuedUnder": "WSSP 2010",
+    "date": "2015-02-16",
+    "subject": "Why mechanical and electrical components are excluded from Recycled Content",
+    "general": false,
+    "creditRefs": { "wssp-2018": ["MW2.1"], "wssp-2023": ["MW2.1"] },
+    "background": "A number of material credit calculations are based on the total cost of materials and the total cost of materials that meet the particular attribute of the credit. Mechanical and electrical components and special equipment are excluded from the numerator and denominator.",
+    "request": "Mechanical and electrical components are excluded in the recycled content calculation. These items make up a significant amount of the total material cost. Why are they excluded?",
+    "interpretation": "The material and equipment costs in these two divisions of work are not to be counted in total cost of materials, nor are the recycled content values to be counted in the total recycled content value. These two divisions make up perhaps 25% of material cost on most projects, and a high percentage of their material is metal with high recycled content. A project could earn the recycled content credits from these divisions alone, which would not be much of a stretch toward sustainability. A primary intent of the credit is to encourage the use of other traditional materials that are now available with recycled content."
+  },
+  {
+    "id": "cil-2014-07-31-epp",
+    "issuedUnder": "WSSP 2010",
+    "date": "2014-07-31",
+    "subject": "Environmentally Preferable Products applies to carpet and resilient flooring only",
+    "general": false,
+    "creditRefs": { "wssp-2018": ["MW2.5"], "wssp-2023": ["MW2.5"] },
+    "background": "This point is an alternate approach for carpet and resilient flooring ONLY, worth up to 2 points for carpet and resilient flooring products that meet the low-emitting finishes requirements AND are certified by a nationally recognized program or by ANSI as an environmentally preferable product.",
+    "request": "Please confirm the requirements. From my understanding projects can earn 1 point (maximum of 2) for each major product that is certified as an environmentally preferable product.",
+    "interpretation": "This credit is only applicable to carpet and resilient flooring, NOT all major products. The credit is an alternate approach to earning credits for carpet and resilient flooring rather than earning points under Materials Reuse, Recycled Content, Rapidly Renewable Materials, or Certified Wood (no double-dipping). To earn this credit the carpet and resilient flooring MUST meet the low-emitting interior finishes requirements, and may be recognized by GreenGuard, FloorScore, SCS, or another nationally recognized EPP program OR ANSI."
+  },
+  {
+    "id": "cil-2014-06-05-moisture",
+    "issuedUnder": "WSSP 2010",
+    "date": "2014-06-05",
+    "subject": "Moisture mitigation is not a flush-out credit",
+    "general": false,
+    "creditRefs": { "wssp-2018": ["IEQ3.0"], "wssp-2023": ["IEQ3.1"] },
+    "background": "This credit outlines work to be accomplished to mitigate moisture damage to affected materials.",
+    "request": "Is this similar to the LEED flush-out credit? Are there parameters or specifications for a contractor to perform aggressive drying and de-humidification? Is there a set time for drying or type of testing that should be specified?",
+    "interpretation": "This credit is not about flushing out the building. Meeting it is project specific: each interior material must be analyzed for moisture content at the start of the project and desired moisture content at substantial completion, included in the contract documents. A performance specification could allow the contractor to achieve the desired moisture content without the permanent HVAC system. Independent testing (e.g., with a Protimeter kit) is probably the only way to verify performance. Anti-microbial treatments are generally short-lived, can contribute to VOC load, and will likely fail if the area is not kept dry. There is no ASTM standard for this work."
+  },
+  {
+    "id": "cil-2015-12-31-sealers",
+    "issuedUnder": "WSSP 2015",
+    "date": "2015-12-31",
+    "subject": "Concrete sealers are covered by SCAQMD Rule 1113, not 1168",
+    "general": false,
+    "creditRefs": { "wssp-2018": ["IEQ3.1"], "wssp-2023": ["IEQ3.2"] },
+    "background": "This credit requires certain products to comply with the environmental standards established by various states, agencies and national standard organizations.",
+    "request": "This credit states that concrete sealers must meet South Coast Air Quality Management District (SCAQMD) Rule 1168, but the rule does not cover concrete sealers.",
+    "interpretation": "Concrete sealers are covered by SCAQMD Rule 1113, not 1168. An addendum to the protocol will be issued."
+  },
+  {
+    "id": "cil-2017-03-21-leif-certifiers",
+    "issuedUnder": "WSSP 2015 / 2015 Second Publication",
+    "date": "2017-03-21",
+    "subject": "Acceptable third-party certifiers for Low-Emitting Interior Finishes",
+    "general": false,
+    "creditRefs": { "wssp-2018": ["IEQ3.1"], "wssp-2023": ["IEQ3.2"] },
+    "background": "This credit requires the use of products with safe limits of chemical emissions demonstrated by third-party testing and certification.",
+    "request": "Do we have to have our products third-party certified by the organizations that are listed in the credit?",
+    "interpretation": "No. You must use products independently tested and certified for VOC emissions by a qualified third party, but not necessarily the listed organizations. Testing shall be per CDPH Standard Method v1.1-2010 or v1.2-2017 using the school classroom exposure scenario (carpet, hard surface flooring, building insulation, acoustical ceilings, wall panels, adhesives and sealants). For wet-applied products, VOC content must be disclosed and meet: interior adhesives/sealants — SCAQMD Rule 1168; interior paints and coatings — SCAQMD Rule 1113 or CARB 2007 SCM; concrete sealers — SCAQMD Rule 1113. All interior composite wood products must contain no added urea formaldehyde, with formaldehyde content disclosed in a third-party certification or manufacturer documentation."
+  },
+  {
+    "id": "cil-2017-03-21-furniture",
+    "issuedUnder": "WSSP 2015 / 2015 Second Publication",
+    "date": "2017-03-21",
+    "subject": "ANSI/BIFMA testing accepted for Low-Emitting Furniture",
+    "general": false,
+    "creditRefs": { "wssp-2018": ["IEQ3.2"], "wssp-2023": ["IEQ3.3"] },
+    "background": "This credit requires 75% or more of the new or newly refurbished student and administrative work stations to be low-VOC emitting, documented by either GreenGuard certification or meeting the US EPA's Environmental Technology Verification (ETV) test method.",
+    "request": "US EPA's ETV is no longer supported. As an alternative may we provide documentation that classroom and administrative furniture has been tested for and meets VOC emissions following the procedures in ANSI/BIFMA?",
+    "interpretation": "Yes. Furniture may be tested for VOC emissions following the procedures in ANSI/BIFMA M7.1-2011, and shall also meet the TVOC and formaldehyde emissions guidelines in ANSI/BIFMA X7.1-2011."
+  },
+  {
+    "id": "cil-2014-11-19-acoustics",
+    "issuedUnder": "WSSP 2010",
+    "date": "2014-11-19",
+    "subject": "Prerequisite relationships within Improved Acoustic Performance sub-points",
+    "general": false,
+    "creditRefs": { "wssp-2018": ["IEQ4.1"], "wssp-2023": ["IEQ4.1"] },
+    "background": "This credit is for superior acoustic performance in classrooms, gymnasiums and other common school spaces, with multiple points each having a separate requirement.",
+    "request": "We cannot attain the first point (Reduced Unoccupied Classroom Noise). Is it OK to take credit for the second point (STC 50 in classrooms) even if you cannot meet the first point?",
+    "interpretation": "The project must earn the first point (Reduced Unoccupied Classroom Noise) in order to be eligible to earn the second point (STC 50 classrooms). However, the project may earn either or both of the Gymnasium Reverberation and Multi-Purpose/Commons/Cafeteria Reverberation points without earning the Reduced Unoccupied Classroom Noise point."
+  },
+  {
+    "id": "cil-2014-12-05-windows",
+    "issuedUnder": "WSSP 2006 / WSSP 2010",
+    "date": "2014-12-05",
+    "subject": "User Control – Windows: control, not window count; computer labs are not classrooms",
+    "general": false,
+    "creditRefs": { "wssp-2018": ["IEQ6.1"], "wssp-2023": ["IEQ6.1"] },
+    "background": "This credit can be earned by including one operable window in each classroom, giving classroom occupants the ability to immediately affect their environment.",
+    "request": "We've provided operable windows in classrooms but there are a handful of interior computer-lab rooms with no exterior windows where instruction is provided. Should these be considered classrooms? If so, did we miss this point?",
+    "interpretation": "This credit is about providing individual control of the windows to the occupants, not about providing windows for the occupants. If occupants can control the windows you have provided in the classrooms, you have achieved the point. Computer labs are not classrooms. WAC 246-366-050(8) governs where and how many windows are needed and in what type of spaces."
+  }
+]
