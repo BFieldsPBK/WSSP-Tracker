@@ -283,7 +283,12 @@ if (process.env.AZURE_CLIENT_ID && process.env.AZURE_CLIENT_SECRET && process.en
       auth: {
         clientId: process.env.AZURE_CLIENT_ID,
         authority: "https://login.microsoftonline.com/" + process.env.AZURE_TENANT_ID,
-        clientSecret: process.env.AZURE_CLIENT_SECRET
+        clientSecret: process.env.AZURE_CLIENT_SECRET,
+        // Set the redirect URI on the app config too (not just on each
+        // getAuthCodeUrl call). Some msal-node versions require it here for the
+        // reply address to be sent to Microsoft; without it sign-in fails with
+        // AADSTS900971 "No reply address provided".
+        redirectUri: process.env.AZURE_REDIRECT_URI || undefined
       }
     });
   } catch (e) {
@@ -297,7 +302,8 @@ function ssoActive() { return !!msalClient; }
  * Derived from the incoming request so it works on both localhost and the
  * deployed hostname; set AZURE_REDIRECT_URI to override if ever needed. */
 function ssoRedirectUri(req) {
-  if (process.env.AZURE_REDIRECT_URI) return process.env.AZURE_REDIRECT_URI;
+  const configured = (process.env.AZURE_REDIRECT_URI || "").trim();
+  if (configured) return configured;
   const proto = (req.secure || req.headers["x-forwarded-proto"] === "https") ? "https" : "http";
   return proto + "://" + req.headers.host + "/auth/sso/callback";
 }
@@ -510,9 +516,15 @@ app.get("/auth/sso/login", async (req, res) => {
     // callback can prove this response belongs to this browser's request.
     const tx = makeSessionValue({ verifier, state, exp: Date.now() + 10 * 60e3 });
     res.setHeader("Set-Cookie", SSO_TX_COOKIE + "=" + tx + cookieAttrs(req, 600));
+    const redirectUri = ssoRedirectUri(req);
+    // Log the exact reply address being sent to Microsoft so an empty/wrong
+    // value (the cause of AADSTS900971 "No reply address provided") shows up in
+    // the App Service log stream.
+    console.error("SSO login redirectUri:", JSON.stringify(redirectUri),
+      "| AZURE_REDIRECT_URI set:", !!process.env.AZURE_REDIRECT_URI, "| host:", req.headers.host);
     const authUrl = await msalClient.getAuthCodeUrl({
       scopes: SSO_SCOPES,
-      redirectUri: ssoRedirectUri(req),
+      redirectUri,
       responseMode: "query",
       codeChallenge: challenge,
       codeChallengeMethod: "S256",
