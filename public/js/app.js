@@ -314,8 +314,12 @@ async function route() {
     }
     let m = hash.match(/^#\/invite\/([A-Za-z0-9_-]+)$/);
     if (m) return renderInviteRedeem(m[1]);
+    // A failed Microsoft sign-in redirects back with ?sso_error=1 — surface a
+    // friendly message on the login page and clear the flag from the URL.
+    const ssoError = new URLSearchParams(location.search).get("sso_error");
+    if (ssoError) history.replaceState(null, "", location.pathname + location.hash);
     await loadMe();
-    if (!ME.authenticated) return renderLogin();
+    if (!ME.authenticated) return renderLogin(ssoError ? "Microsoft sign-in didn't complete. Please try again, or use another sign-in option below." : undefined);
     if (hash === "#/login") { location.hash = "#/"; return; }
     if (hash === "#/" || hash === "#") {
       // Guests never see a project list — they land on their project.
@@ -358,7 +362,7 @@ function renderLogin(errorMsg) {
         <p class="lede">Washington Sustainable Schools Protocol compliance tracking.</p>
         ${errorMsg ? `<div class="form-errors">${esc(errorMsg)}</div>` : ""}
         ${ME && ME.microsoftSso ? `
-          <a class="btn btn-primary login-ms" href="/.auth/login/aad?post_login_redirect_uri=/">
+          <a class="btn btn-primary login-ms" href="${esc(ME.microsoftSsoUrl || "/.auth/login/aad?post_login_redirect_uri=/")}">
             Sign in with Microsoft
           </a>
           <div class="login-divider">PBK staff only</div>` : `
