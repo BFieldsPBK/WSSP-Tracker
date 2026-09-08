@@ -18,7 +18,7 @@ const PORT = process.env.PORT || 3000;
  * of letting edits silently fail. */
 const API_VERSION = 22;
 
-const DATA_DIR = process.env.APPDATA_DIR || path.join(__dirname, "data");
+const DATA_DIR = process.env.DATA_DIR || process.env.APPDATA_DIR || path.join(__dirname, "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
 const FILES_DIR = path.join(DATA_DIR, "files");
 const PROTOCOL_DIR = path.join(__dirname, "config", "protocols");
