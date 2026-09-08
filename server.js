@@ -266,6 +266,56 @@ const GUEST_SESSION_MS = 30 * 24 * 3600e3;
  * (used for the Secure cookie flag). */
 if (IS_AZURE || process.env.TRUST_PROXY === "1") app.set("trust proxy", 1);
 
+/* ── Microsoft SSO (Azure AD / Entra ID) ─────────────────────── *
+ * PBK staff sign in with their Microsoft 365 account through the OAuth 2.0
+ * Authorization Code flow (MSAL for Node). A successful sign-in creates a
+ * normal staff session (kind:"staff", via:"microsoft"), so SSO users get the
+ * same full access as any other staff member. SSO turns on only when all
+ * three app-registration values are present in the environment; otherwise the
+ * feature stays off and local/dev sign-in keeps using the staff access code.
+ * This lets the code ship before IT creates the Azure AD app registration. */
+const SSO_SCOPES = ["openid", "profile", "email", "User.Read"];
+let msalClient = null;
+if (process.env.AZURE_CLIENT_ID && process.env.AZURE_CLIENT_SECRET && process.env.AZURE_TENANT_ID) {
+  try {
+    const { ConfidentialClientApplication } = require("@azure/msal-node");
+    msalClient = new ConfidentialClientApplication({
+      auth: {
+        clientId: process.env.AZURE_CLIENT_ID,
+        authority: "https://login.microsoftonline.com/" + process.env.AZURE_TENANT_ID,
+        clientSecret: process.env.AZURE_CLIENT_SECRET
+      }
+    });
+  } catch (e) {
+    console.error("Microsoft SSO disabled — could not initialize MSAL:", e.message);
+    msalClient = null;
+  }
+}
+function ssoActive() { return !!msalClient; }
+
+/* The redirect URI must exactly match one registered on the Azure AD app.
+ * Derived from the incoming request so it works on both localhost and the
+ * deployed hostname; set AZURE_REDIRECT_URI to override if ever needed. */
+function ssoRedirectUri(req) {
+  if (process.env.AZURE_REDIRECT_URI) return process.env.AZURE_REDIRECT_URI;
+  const proto = (req.secure || req.headers["x-forwarded-proto"] === "https") ? "https" : "http";
+  return proto + "://" + req.headers.host + "/auth/sso/callback";
+}
+
+/* Which "Sign in with Microsoft" path (if any) the login page should offer.
+ * MSAL is preferred when configured; Azure App Service Easy Auth is the
+ * fallback where that is enabled instead. */
+function ssoInfo() {
+  if (ssoActive()) return { microsoftSso: true, microsoftSsoUrl: "/auth/sso/login" };
+  if (TRUST_EASY_AUTH) return { microsoftSso: true, microsoftSsoUrl: "/.auth/login/aad?post_login_redirect_uri=/" };
+  return { microsoftSso: false, microsoftSsoUrl: null };
+}
+
+/* Short-lived signed cookie carrying the PKCE verifier + CSRF state between
+ * the /auth/sso/login redirect and the /auth/sso/callback. Reuses the same
+ * HMAC signing as the session cookie so it can't be forged. */
+const SSO_TX_COOKIE = "wssp_sso_tx";
+
 /* Sliding-window rate limiter for credential and invite-token endpoints,
  * keyed per client IP per endpoint. In-memory is fine here: the server is a
  * single process, and losing counters on restart is acceptable. */
@@ -405,14 +455,14 @@ app.get("/api/meta", (req, res) => {
 });
 
 app.get("/api/me", (req, res) => {
-  if (!req.user) return res.json({ authenticated: false, microsoftSso: TRUST_EASY_AUTH });
+  if (!req.user) return res.json({ authenticated: false, ...ssoInfo() });
   const out = {
     authenticated: true,
     kind: req.user.kind,
     name: req.user.name || "",
     email: req.user.email || "",
     via: req.user.via || "code",
-    microsoftSso: TRUST_EASY_AUTH
+    ...ssoInfo()
   };
   if (req.user.kind === "guest") {
     out.projects = validGrants(req)
@@ -443,6 +493,77 @@ app.post("/api/login", (req, res) => {
 app.post("/api/logout", (req, res) => {
   clearSession(req, res);
   res.json({ ok: true });
+});
+
+/* ── Microsoft SSO routes (Authorization Code flow) ──────────── *
+ * /auth/sso/login  → send the user to Microsoft with a PKCE challenge.
+ * /auth/sso/callback → exchange the code, then create a staff session.
+ * Both no-op gracefully when SSO isn't configured. */
+app.get("/auth/sso/login", async (req, res) => {
+  if (!ssoActive()) return res.status(404).send("Microsoft sign-in is not configured.");
+  try {
+    const { CryptoProvider } = require("@azure/msal-node");
+    const cryptoProvider = new CryptoProvider();
+    const { verifier, challenge } = await cryptoProvider.generatePkceCodes();
+    const state = cryptoProvider.createNewGuid();
+    // Stash the PKCE verifier + state in a short-lived signed cookie so the
+    // callback can prove this response belongs to this browser's request.
+    const tx = makeSessionValue({ verifier, state, exp: Date.now() + 10 * 60e3 });
+    res.setHeader("Set-Cookie", SSO_TX_COOKIE + "=" + tx + cookieAttrs(req, 600));
+    const authUrl = await msalClient.getAuthCodeUrl({
+      scopes: SSO_SCOPES,
+      redirectUri: ssoRedirectUri(req),
+      responseMode: "query",
+      codeChallenge: challenge,
+      codeChallengeMethod: "S256",
+      state,
+      prompt: "select_account"
+    });
+    res.redirect(authUrl);
+  } catch (e) {
+    console.error("SSO login error:", e.message);
+    res.redirect("/?sso_error=1");
+  }
+});
+
+app.get("/auth/sso/callback", async (req, res) => {
+  const clearTx = SSO_TX_COOKIE + "=" + cookieAttrs(req, 0);
+  if (!ssoActive()) { res.setHeader("Set-Cookie", clearTx); return res.redirect("/"); }
+  const fail = () => { res.setHeader("Set-Cookie", clearTx); return res.redirect("/?sso_error=1"); };
+  const c = getCookies(req)[SSO_TX_COOKIE];
+  const tx = c ? parseSessionValue(c) : null;
+  if (req.query.error) {
+    console.error("SSO callback error:", req.query.error, req.query.error_description || "");
+    return fail();
+  }
+  if (!tx || !req.query.code || !req.query.state || req.query.state !== tx.state) return fail();
+  try {
+    const result = await msalClient.acquireTokenByCode({
+      code: String(req.query.code),
+      scopes: SSO_SCOPES,
+      redirectUri: ssoRedirectUri(req),
+      codeVerifier: tx.verifier
+    });
+    const acct = result.account || {};
+    const claims = result.idTokenClaims || {};
+    const email = acct.username || claims.preferred_username || claims.email || "";
+    const name = acct.name || claims.name || email;
+    const payload = {
+      kind: "staff",
+      name: String(name).trim().slice(0, 80),
+      email: String(email).trim().slice(0, 120),
+      via: "microsoft",
+      exp: Date.now() + STAFF_SESSION_MS
+    };
+    // Set the staff session and clear the transaction cookie in one response.
+    const maxAge = Math.max(0, Math.floor((payload.exp - Date.now()) / 1000));
+    const sessionCookie = "wssp_session=" + makeSessionValue(payload) + cookieAttrs(req, maxAge);
+    res.setHeader("Set-Cookie", [sessionCookie, clearTx]);
+    res.redirect("/");
+  } catch (e) {
+    console.error("SSO token exchange failed:", e.message);
+    return fail();
+  }
 });
 
 /* ── Invites ─────────────────────────────────────────────────── */
