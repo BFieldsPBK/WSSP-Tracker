@@ -385,15 +385,17 @@ function renderLogin(errorMsg) {
           </form>`}
         <div class="login-divider" style="margin:20px 0 14px;">Consultants · Clients · Contractors</div>
         <form id="guest-login">
-          <div class="form-field">
-            <label for="g-email">Email</label>
-            <input id="g-email" type="email" autocomplete="email" placeholder="you@yourfirm.com" value="${esc(loginPrefill.guestEmail)}">
-          </div>
-          <div class="form-field">
-            <label for="g-pass">Password</label>
-            <input id="g-pass" type="password" autocomplete="current-password">
-            <span class="hint">First time? Use the invite link from your PBK contact to create your
-            password. Forgot it? Ask them to reissue your link.</span>
+          <div id="guest-fields"${loginPrefill.guestEmail ? "" : ' class="hidden"'}>
+            <div class="form-field">
+              <label for="g-email">Email</label>
+              <input id="g-email" type="email" autocomplete="email" placeholder="you@yourfirm.com" value="${esc(loginPrefill.guestEmail)}">
+            </div>
+            <div class="form-field">
+              <label for="g-pass">Password</label>
+              <input id="g-pass" type="password" autocomplete="current-password">
+              <span class="hint">First time? Use the invite link from your PBK contact to create your
+              password. Forgot it? Ask them to reissue your link.</span>
+            </div>
           </div>
           <button class="btn btn-secondary" type="submit" style="width:100%; justify-content:center;">Collaborator Sign In</button>
         </form>
@@ -420,6 +422,16 @@ function renderLogin(errorMsg) {
   const guestForm = document.getElementById("guest-login");
   if (guestForm) guestForm.addEventListener("submit", async ev => {
     ev.preventDefault();
+    // Progressive disclosure: the email/password fields start hidden, so the
+    // first click on "Collaborator Sign In" just reveals them. External users
+    // then enter their credentials and click again to actually sign in.
+    const guestFields = document.getElementById("guest-fields");
+    if (guestFields && guestFields.classList.contains("hidden")) {
+      guestFields.classList.remove("hidden");
+      const emailInput = document.getElementById("g-email");
+      if (emailInput) emailInput.focus();
+      return;
+    }
     loginPrefill.guestEmail = document.getElementById("g-email").value;
     try {
       const result = await api("POST", "/api/login/guest", {
