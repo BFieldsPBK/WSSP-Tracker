@@ -514,8 +514,8 @@ app.get("/auth/sso/login", async (req, res) => {
     const state = cryptoProvider.createNewGuid();
     // Stash the PKCE verifier + state in a short-lived signed cookie so the
     // callback can prove this response belongs to this browser's request.
-    const tx = makeSessionValue({ verifier, state, exp: Date.now() + 10 * 60e3 });
-    res.setHeader("Set-Cookie", SSO_TX_COOKIE + "=" + tx + cookieAttrs(req, 600));
+    const tx = makeSessionValue({ verifier, state, exp: Date.now() + 30 * 60e3 });
+    res.setHeader("Set-Cookie", SSO_TX_COOKIE + "=" + tx + cookieAttrs(req, 1800));
     const redirectUri = ssoRedirectUri(req);
     // Log the exact reply address being sent to Microsoft so an empty/wrong
     // value (the cause of AADSTS900971 "No reply address provided") shows up in
@@ -548,7 +548,13 @@ app.get("/auth/sso/callback", async (req, res) => {
     console.error("SSO callback error:", req.query.error, req.query.error_description || "");
     return fail();
   }
-  if (!tx || !req.query.code || !req.query.state || req.query.state !== tx.state) return fail();
+  // Each rejection reason is logged separately so the App Service log stream
+  // shows exactly which step failed for a given sign-in attempt.
+  if (!c) { console.error("SSO callback rejected: sign-in cookie missing (browser did not return wssp_sso_tx)"); return fail(); }
+  if (!tx) { console.error("SSO callback rejected: sign-in cookie present but failed to verify or expired"); return fail(); }
+  if (!req.query.code) { console.error("SSO callback rejected: no authorization code in the response"); return fail(); }
+  if (!req.query.state) { console.error("SSO callback rejected: no state value in the response"); return fail(); }
+  if (req.query.state !== tx.state) { console.error("SSO callback rejected: state mismatch (possible CSRF or cookie crossover)"); return fail(); }
   try {
     const result = await msalClient.acquireTokenByCode({
       code: String(req.query.code),
@@ -573,7 +579,7 @@ app.get("/auth/sso/callback", async (req, res) => {
     res.setHeader("Set-Cookie", [sessionCookie, clearTx]);
     res.redirect("/");
   } catch (e) {
-    console.error("SSO token exchange failed:", e.message);
+    console.error("SSO token exchange failed:", e.errorCode || "", e.errorMessage || "", e.message || "");
     return fail();
   }
 });
