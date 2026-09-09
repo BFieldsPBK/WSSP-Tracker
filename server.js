@@ -541,20 +541,35 @@ app.get("/auth/sso/login", async (req, res) => {
 app.get("/auth/sso/callback", async (req, res) => {
   const clearTx = SSO_TX_COOKIE + "=" + cookieAttrs(req, 0);
   if (!ssoActive()) { res.setHeader("Set-Cookie", clearTx); return res.redirect("/"); }
-  const fail = () => { res.setHeader("Set-Cookie", clearTx); return res.redirect("/?sso_error=1"); };
+  // Persist each rejection reason to a file in the data directory. The app's
+  // console output is not retrievable on this host, so a file is the only
+  // reliable way to see exactly which step failed for a given sign-in attempt.
+  const diag = (reason) => {
+    try {
+      const line = new Date().toISOString() + " " + reason +
+        " | host=" + (req.headers.host || "") +
+        " | hasCookie=" + !!getCookies(req)[SSO_TX_COOKIE] +
+        " | hasCode=" + !!req.query.code +
+        " | hasState=" + !!req.query.state + "\n";
+      fs.appendFileSync(path.join(DATA_DIR, "sso-diag.log"), line);
+    } catch (_) { /* never let logging break the flow */ }
+    console.error("SSO callback rejected:", reason);
+  };
+  const fail = (reason) => {
+    diag(reason);
+    res.setHeader("Set-Cookie", clearTx);
+    return res.redirect("/?sso_error=1&reason=" + encodeURIComponent(reason));
+  };
   const c = getCookies(req)[SSO_TX_COOKIE];
   const tx = c ? parseSessionValue(c) : null;
   if (req.query.error) {
-    console.error("SSO callback error:", req.query.error, req.query.error_description || "");
-    return fail();
+    return fail("microsoft_error:" + req.query.error);
   }
-  // Each rejection reason is logged separately so the App Service log stream
-  // shows exactly which step failed for a given sign-in attempt.
-  if (!c) { console.error("SSO callback rejected: sign-in cookie missing (browser did not return wssp_sso_tx)"); return fail(); }
-  if (!tx) { console.error("SSO callback rejected: sign-in cookie present but failed to verify or expired"); return fail(); }
-  if (!req.query.code) { console.error("SSO callback rejected: no authorization code in the response"); return fail(); }
-  if (!req.query.state) { console.error("SSO callback rejected: no state value in the response"); return fail(); }
-  if (req.query.state !== tx.state) { console.error("SSO callback rejected: state mismatch (possible CSRF or cookie crossover)"); return fail(); }
+  if (!c) return fail("cookie_missing");
+  if (!tx) return fail("cookie_invalid_or_expired");
+  if (!req.query.code) return fail("no_code");
+  if (!req.query.state) return fail("no_state");
+  if (req.query.state !== tx.state) return fail("state_mismatch");
   try {
     const result = await msalClient.acquireTokenByCode({
       code: String(req.query.code),
@@ -579,8 +594,7 @@ app.get("/auth/sso/callback", async (req, res) => {
     res.setHeader("Set-Cookie", [sessionCookie, clearTx]);
     res.redirect("/");
   } catch (e) {
-    console.error("SSO token exchange failed:", e.errorCode || "", e.errorMessage || "", e.message || "");
-    return fail();
+    return fail("token_exchange_failed:" + (e.errorCode || e.message || "unknown"));
   }
 });
 

@@ -85,6 +85,7 @@ test("SSO enabled: callback with a mismatched state is rejected (CSRF guard)", a
   try {
     const res = await fetch(s.base + "/auth/sso/callback?code=abc&state=not-the-real-state", { redirect: "manual" });
     assert.equal(res.status, 302);
-    assert.equal(res.headers.get("location"), "/?sso_error=1");
+    // Redirect carries the sso_error flag plus a short reason code for diagnostics.
+    assert.ok(res.headers.get("location").startsWith("/?sso_error=1"));
   } finally { s.stop(); }
 });
