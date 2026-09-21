@@ -208,6 +208,19 @@ function wsspEuiTarget(project) {
   return EUI_TARGETS[kind]?.[hours]?.[project.climateZone]?.[level] ?? null;
 }
 
+/* The AIA / Architecture 2030 Challenge tightens its energy-reduction target
+ * on a schedule (70% by 2015, 80% by 2020, 90% by 2025, 100% by 2030). Pick
+ * the current step from today's year so the dashboard's AIA 2030 marker tracks
+ * the schedule automatically unless the project overrides it. */
+function currentAia2030Pct() {
+  const yr = new Date().getFullYear();
+  if (yr >= 2030) return 100;
+  if (yr >= 2025) return 90;
+  if (yr >= 2020) return 80;
+  if (yr >= 2015) return 70;
+  return 60;
+}
+
 function dPhaseInfo(v) {
   return D_PHASES.find(p => p.value === normalizeDPhase(v));
 }
@@ -661,7 +674,7 @@ async function renderProjectForm(id) {
 
   const field = (name, label, opts = {}) => `
     <div class="form-field">
-      <label for="f-${name}">${label}${opts.required ? ' <span class="req">*</span>' : ""}</label>
+      <label for="f-${name}">${opts.link ? `<a href="${esc(opts.link)}" target="_blank" rel="noopener">${label}</a>` : label}${opts.required ? ' <span class="req">*</span>' : ""}</label>
       <input id="f-${name}" name="${name}" type="text" value="${esc(project[name] || "")}"
         ${opts.placeholder ? `placeholder="${esc(opts.placeholder)}"` : ""}>
       ${opts.hint ? `<span class="hint">${opts.hint}</span>` : ""}
@@ -773,13 +786,15 @@ async function renderProjectForm(id) {
             </select>
             <span class="hint">Per the CBPS tables in WSSP 2023 credit E1.2.</span>
           </div>
-          ${field("aiaReductionPct", "AIA 2030 target (% reduction)", { placeholder: "80",
-            hint: "Percent reduction from baseline EUI for the dashboard's AIA 2030 marker — editable as the 2030 Challenge targets change. Defaults to 80." })}
+          ${field("aiaReductionPct", "AIA 2030 target (% reduction)", { placeholder: String(currentAia2030Pct()),
+            hint: `Automatically set from the Architecture 2030 Challenge schedule (currently ${currentAia2030Pct()}% for ${new Date().getFullYear()}). Clear this field to track the schedule automatically, or enter a number to override.` })}
         </div>
         <div class="form-row">
           ${field("zeroToolBaseline", "Zero Tool Baseline (kBtu/sf/yr)", { placeholder: "e.g. 46",
+            link: "https://www.zerotool.org/zerotool/",
             hint: "From Architecture 2030's Zero Tool — the baseline the AIA 2030 target reduces from." })}
           ${field("cbpsBaseline", "CBPS Baseline (kBtu/sf/yr)", { placeholder: "e.g. 49",
+            link: "https://www.commerce.wa.gov/cbps/cbps-support-and-resources/cbps-documents/",
             hint: "Washington Clean Buildings Performance Standard EUI target (EUIt) for this building." })}
         </div>
         <div class="form-row">
@@ -999,7 +1014,7 @@ async function renderDashboard(id) {
   // joins later, once the team has a predicted EUI.
   const euiReady = !!baseline;
   const aiaPct = project.aiaReductionPct !== "" && project.aiaReductionPct != null
-    ? Number(project.aiaReductionPct) : 80;
+    ? Number(project.aiaReductionPct) : currentAia2030Pct();
   const aiaTarget = zeroTool ? +(zeroTool * (1 - aiaPct / 100)).toFixed(1) : null;
   const euiTicks = [];
   if (zeroTool) euiTicks.push({ key: "zt", value: zeroTool, label: `Zero Tool ${zeroTool}` });
